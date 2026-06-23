@@ -23,8 +23,14 @@ function formatBR(iso){return iso ? iso.split('-').reverse().join('/') : ''}
 function cycleFromDate(date=new Date()){
   const y=date.getFullYear(), m=date.getMonth(), d=date.getDate()
   const start = d>=12 ? new Date(y,m,12) : new Date(y,m-1,12)
-  const end = new Date(start.getFullYear(), start.getMonth()+1, 12)
+  const end = d>=12 ? new Date(y,m+1,11) : new Date(y,m,11)
   return {start,end}
+}
+function nextCycleFromStart(startIso, offset=1){
+  const base = new Date(startIso + 'T00:00:00')
+  const start = new Date(base.getFullYear(), base.getMonth()+offset, 12)
+  const end = new Date(base.getFullYear(), base.getMonth()+offset+1, 11)
+  return { start: toIso(start), end: toIso(end) }
 }
 function diffDaysInclusive(a,b){
   const x=new Date(a+'T00:00:00'), y=new Date(b+'T00:00:00')
@@ -79,7 +85,7 @@ function App(){
   const [editingCompromisso,setEditingCompromisso]=useState(null)
   const [editingTransacao,setEditingTransacao]=useState(null)
 
-  const emptyForm = {data:isoToday(),tipo:'Despesa',categoria:'Alimentação',conta:'Inter',forma:'Débito/PIX',natureza:'Gastos Variáveis',descricao:'',valor:''}
+  const emptyForm = {data:isoToday(),tipo:'Despesa',categoria:'Alimentação',conta:'Inter',forma:'Débito/PIX',natureza:'Gastos Variáveis',descricao:'',valor:'',parcelamento:'À vista',quantidade_parcelas:2}
   const emptyCompForm = {descricao:'',categoria:'Outros',conta:'Inter',forma:'Débito/PIX',natureza:'Gastos Fixos',valor_previsto:''}
   const [form,setForm]=useState(emptyForm)
   const [compForm,setCompForm]=useState(emptyCompForm)
@@ -102,20 +108,82 @@ function App(){
     setTransacoes(t||[]); setCompromissos(c||[])
   }
 
+  async function criarCompromissosFuturos({descricao, categoria, conta, forma, natureza, valorParcela, quantidade, inicioOffset=1, recorrente=false}){
+    const rows = []
+    for(let i=inicioOffset; i<quantidade; i++){
+      const ciclo = nextCycleFromStart(inicioCiclo, i)
+      rows.push({
+        user_id: session.user.id,
+        ciclo_inicio: ciclo.start,
+        ciclo_fim: ciclo.end,
+        descricao: recorrente ? `${descricao} (recorrente)` : `${descricao} (${i+1}/${quantidade})`,
+        categoria,
+        conta,
+        forma,
+        natureza,
+        valor_previsto: valorParcela,
+        status: 'Previsto'
+      })
+    }
+    if(rows.length > 0){
+      const { error } = await supabase.from('compromissos').insert(rows)
+      if(error) throw error
+    }
+  }
+
   async function adicionar(e){
     e.preventDefault()
-    const valor=Number(String(form.valor).replace(',','.'))
-    if(!valor||valor<=0) return alert('Informe um valor válido.')
-    const payload = {...form,valor,user_id:session.user.id}
-    const result = editingTransacao
-      ? await supabase.from('transacoes').update(payload).eq('id', editingTransacao.id)
-      : await supabase.from('transacoes').insert(payload)
-    if(result.error) alert(result.error.message)
-    else {setForm({...emptyForm,data:isoToday()}); setEditingTransacao(null); carregar()}
+    const valorInformado=Number(String(form.valor).replace(',','.'))
+    if(!valorInformado||valorInformado<=0) return alert('Informe um valor válido.')
+
+    const qtd = Math.max(1, Number(form.quantidade_parcelas || 1))
+    const ehParcelado = form.parcelamento === 'Parcelado'
+    const ehRecorrente = form.parcelamento === 'Recorrente/sem previsão'
+    const valorLancamento = ehParcelado ? Number((valorInformado / qtd).toFixed(2)) : valorInformado
+    const descricaoLancamento = ehParcelado ? `${form.descricao} (1/${qtd})` : form.descricao
+
+    const { parcelamento, quantidade_parcelas, ...formSemParcelamento } = form
+    const payload = {...formSemParcelamento, descricao: descricaoLancamento, valor: valorLancamento, user_id:session.user.id}
+
+    try {
+      const result = editingTransacao
+        ? await supabase.from('transacoes').update(payload).eq('id', editingTransacao.id)
+        : await supabase.from('transacoes').insert(payload)
+      if(result.error) throw result.error
+
+      if(!editingTransacao && ehParcelado && qtd > 1){
+        await criarCompromissosFuturos({
+          descricao: form.descricao,
+          categoria: form.categoria,
+          conta: form.conta,
+          forma: form.forma,
+          natureza: form.natureza,
+          valorParcela: valorLancamento,
+          quantidade: qtd
+        })
+      }
+
+      if(!editingTransacao && ehRecorrente){
+        await criarCompromissosFuturos({
+          descricao: form.descricao,
+          categoria: form.categoria,
+          conta: form.conta,
+          forma: form.forma,
+          natureza: form.natureza,
+          valorParcela: valorInformado,
+          quantidade: qtd,
+          recorrente: true
+        })
+      }
+
+      setForm({...emptyForm,data:isoToday()}); setEditingTransacao(null); carregar()
+    } catch(error){
+      alert(error.message)
+    }
   }
   function editarTransacao(t){
     setEditingTransacao(t)
-    setForm({data:t.data,tipo:t.tipo,categoria:t.categoria,conta:t.conta,forma:t.forma,natureza:t.natureza,descricao:t.descricao,valor:t.valor})
+    setForm({data:t.data,tipo:t.tipo,categoria:t.categoria,conta:t.conta,forma:t.forma,natureza:t.natureza,descricao:t.descricao,valor:t.valor,parcelamento:'À vista',quantidade_parcelas:2})
     window.scrollTo({top:0, behavior:'smooth'})
   }
   async function excluir(id){
@@ -161,8 +229,8 @@ function App(){
   }
 
   function aplicarCicloAtual(){const c=cycleFromDate();setInicioCiclo(toIso(c.start));setFimCiclo(toIso(c.end))}
-  function proximoCiclo(){const s=new Date(inicioCiclo+'T00:00:00'),e=new Date(fimCiclo+'T00:00:00');setInicioCiclo(toIso(new Date(s.getFullYear(),s.getMonth()+1,12)));setFimCiclo(toIso(new Date(e.getFullYear(),e.getMonth()+1,12)))}
-  function cicloAnterior(){const s=new Date(inicioCiclo+'T00:00:00'),e=new Date(fimCiclo+'T00:00:00');setInicioCiclo(toIso(new Date(s.getFullYear(),s.getMonth()-1,12)));setFimCiclo(toIso(new Date(e.getFullYear(),e.getMonth()-1,12)))}
+  function proximoCiclo(){const s=new Date(inicioCiclo+'T00:00:00');setInicioCiclo(toIso(new Date(s.getFullYear(),s.getMonth()+1,12)));setFimCiclo(toIso(new Date(s.getFullYear(),s.getMonth()+2,11)))}
+  function cicloAnterior(){const s=new Date(inicioCiclo+'T00:00:00');setInicioCiclo(toIso(new Date(s.getFullYear(),s.getMonth()-1,12)));setFimCiclo(toIso(new Date(s.getFullYear(),s.getMonth(),11)))}
 
   const dash=useMemo(()=>{
     const soma=(arr)=>arr.reduce((s,t)=>s+Number(t.valor||t.valor_previsto||0),0)
@@ -173,6 +241,11 @@ function App(){
     const pagamentosFatura=soma(transacoes.filter(t=>t.tipo==='Pagamento Fatura'))
     const gastosVariaveis=soma(transacoes.filter(t=>t.tipo==='Despesa'&&t.natureza==='Gastos Variáveis'))
     const credito=soma(transacoes.filter(t=>t.forma==='Crédito'&&['Despesa','Investimento','Pagamento Fatura'].includes(t.tipo)))
+    const debitoPixDisponivel=CONTAS.map(conta=>{
+      const receitasConta = transacoes.filter(t=>t.conta===conta && t.tipo==='Receita Recebida').reduce((s,t)=>s+Number(t.valor),0)
+      const saidasConta = transacoes.filter(t=>t.conta===conta && t.forma==='Débito/PIX' && ['Despesa','Investimento','Pagamento Fatura'].includes(t.tipo)).reduce((s,t)=>s+Number(t.valor),0)
+      return receitasConta-saidasConta
+    }).reduce((s,v)=>s+v,0)
     const compromissosPrevistos=compromissos.filter(c=>c.status==='Previsto').reduce((s,c)=>s+Number(c.valor_previsto),0)
     const reservaAporte=Math.max(0,metaAporte-investimentos)
     const receitaTotal=receitaPrevista+receitaRecebida
@@ -185,7 +258,7 @@ function App(){
     const mediaVariavelDia=gastosVariaveis/Math.max(1,diasPassados)
     const projecaoVariavelRestante=mediaVariavelDia*diasRestantes
     const saldoProjetado=livreParaGastar-projecaoVariavelRestante
-    return {receitaPrevista,receitaRecebida,receitaTotal,despesas,investimentos,pagamentosFatura,gastosVariaveis,credito,compromissosPrevistos,reservaAporte,livreParaGastar,diasRestantes,mediaVariavelDia,projecaoVariavelRestante,saldoProjetado}
+    return {receitaPrevista,receitaRecebida,receitaTotal,despesas,investimentos,pagamentosFatura,gastosVariaveis,credito,debitoPixDisponivel,compromissosPrevistos,reservaAporte,livreParaGastar,diasRestantes,mediaVariavelDia,projecaoVariavelRestante,saldoProjetado}
   },[transacoes,compromissos,metaAporte,saldoInicialPix,inicioCiclo,fimCiclo])
 
   const gastosReais = transacoes.filter(t=>['Despesa','Investimento','Pagamento Fatura'].includes(t.tipo))
@@ -211,6 +284,14 @@ function App(){
   },[transacoes])
   const porConta=useMemo(()=>{
     return CONTAS.map(conta=>({conta, valor:gastosReais.filter(t=>t.conta===conta).reduce((s,t)=>s+Number(t.valor),0)}))
+  },[transacoes])
+  const fixosVariaveis=useMemo(()=>{
+    const fixos = transacoes.filter(t=>['Despesa','Investimento','Pagamento Fatura'].includes(t.tipo) && t.natureza==='Gastos Fixos').reduce((s,t)=>s+Number(t.valor),0)
+    const variaveis = transacoes.filter(t=>['Despesa','Investimento','Pagamento Fatura'].includes(t.tipo) && t.natureza==='Gastos Variáveis').reduce((s,t)=>s+Number(t.valor),0)
+    return [
+      {natureza:'Gastos Fixos', valor:fixos},
+      {natureza:'Gastos Variáveis', valor:variaveis}
+    ]
   },[transacoes])
   const porDiaVariavel=useMemo(()=>{
     const map={}
@@ -260,6 +341,7 @@ function App(){
         <div className="card"><span>Investido</span><strong>{money(dash.investimentos)}</strong><small>Reserva aporte: {money(dash.reservaAporte)}</small></div>
         <div className="card"><span>Gasto variável/dia</span><strong>{money(dash.mediaVariavelDia)}</strong></div>
         <div className="card"><span>Crédito usado</span><strong>{money(dash.credito)}</strong></div>
+        <div className="card"><span>Débito/PIX disponível</span><strong className={dash.debitoPixDisponivel>=0?'green':'red'}>{money(dash.debitoPixDisponivel)}</strong></div>
       </section>
 
       <section className="projection"><div><h2><TrendingUp size={19}/> Projeção do ciclo</h2><p>Média de gasto variável real: <b>{money(dash.mediaVariavelDia)}/dia</b>. Faltam <b>{dash.diasRestantes}</b> dias. Projeção variável restante: <b>{money(dash.projecaoVariavelRestante)}</b>.</p></div><div className={dash.saldoProjetado>=0?'projection-number green':'projection-number red'}><span>Saldo projetado</span><strong>{money(dash.saldoProjetado)}</strong></div></section>
@@ -272,8 +354,14 @@ function App(){
           <select value={form.conta} onChange={e=>setForm({...form,conta:e.target.value})}>{CONTAS.map(x=><option key={x}>{x}</option>)}</select>
           <select value={form.forma} onChange={e=>setForm({...form,forma:e.target.value})}>{FORMAS.map(x=><option key={x}>{x}</option>)}</select>
           <select value={form.natureza} onChange={e=>setForm({...form,natureza:e.target.value})}>{NATUREZAS.map(x=><option key={x}>{x}</option>)}</select>
+          <select value={form.parcelamento} onChange={e=>setForm({...form,parcelamento:e.target.value})} disabled={!!editingTransacao}>
+            <option>À vista</option>
+            <option>Parcelado</option>
+            <option>Recorrente/sem previsão</option>
+          </select>
+          {(form.parcelamento === 'Parcelado' || form.parcelamento === 'Recorrente/sem previsão') && <input placeholder={form.parcelamento === 'Parcelado' ? 'Quantidade de parcelas' : 'Ciclos futuros previstos'} type="number" min="2" step="1" value={form.quantidade_parcelas} onChange={e=>setForm({...form,quantidade_parcelas:e.target.value})} required/>}
           <input placeholder="Descrição" value={form.descricao} onChange={e=>setForm({...form,descricao:e.target.value})} required/>
-          <input placeholder="Valor" type="number" step="0.01" value={form.valor} onChange={e=>setForm({...form,valor:e.target.value})} required/>
+          <input placeholder={form.parcelamento === 'Parcelado' ? 'Valor total da compra' : 'Valor'} type="number" step="0.01" value={form.valor} onChange={e=>setForm({...form,valor:e.target.value})} required/>
         </div><button>{editingTransacao?'Salvar edição':'Adicionar lançamento'}</button>{editingTransacao&&<button type="button" className="ghost full" onClick={()=>{setEditingTransacao(null);setForm({...emptyForm,data:isoToday()})}}>Cancelar edição</button>}</form>
 
         <form className="panel form" onSubmit={salvarCompromisso}><h2><Plus size={18}/> Compromisso previsto</h2><div className="form-grid">
@@ -298,7 +386,12 @@ function App(){
 
       <section className="layout">
         <div className="panel"><h2>Gastos reais por conta</h2><div className="chart"><ResponsiveContainer width="100%" height={240}><BarChart data={porConta}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="conta"/><YAxis/><Tooltip formatter={(v)=>money(v)}/><Bar dataKey="valor" radius={[8,8,0,0]}>{porConta.map((_,i)=><Cell key={i} fill={COLORS[i]}/>)}</Bar></BarChart></ResponsiveContainer></div></div>
-        <div className="panel"><h2>Resumo por categoria</h2><div className="simple-list">{porCategoriaBase.sort((a,b)=>b.valor-a.valor).map((c,i)=><div key={c.categoria}><span><b className="dot" style={{background:COLORS[i%COLORS.length]}}></b>{c.categoria}</span><b>{money(c.valor)} • {pct(c.valor,dash.receitaTotal+saldoInicialPix)}</b></div>)}</div></div>
+        <div className="panel"><h2>Resumo por categoria</h2><div className="simple-list">{porCategoria.map((c,i)=><div key={c.categoria}><span><b className="dot" style={{background:COLORS[i%COLORS.length]}}></b>{c.categoria}</span><b>{money(c.valor)} • {pct(c.valor,dash.receitaTotal+saldoInicialPix)}</b></div>)}</div></div>
+      </section>
+
+      <section className="layout">
+        <div className="panel"><h2>Gastos fixos x variáveis</h2><div className="chart"><ResponsiveContainer width="100%" height={240}><BarChart data={fixosVariaveis}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="natureza"/><YAxis/><Tooltip formatter={(v)=>money(v)}/><Bar dataKey="valor" radius={[8,8,0,0]}>{fixosVariaveis.map((_,i)=><Cell key={i} fill={COLORS[i+4]}/>)}</Bar></BarChart></ResponsiveContainer></div></div>
+        <div className="panel"><h2>Resumo fixos x variáveis</h2><div className="simple-list">{fixosVariaveis.map((n,i)=><div key={n.natureza}><span><b className="dot" style={{background:COLORS[i+4]}}></b>{n.natureza}</span><b>{money(n.valor)} • {pct(n.valor,dash.receitaTotal+saldoInicialPix)}</b></div>)}</div></div>
       </section>
 
       <section className="panel"><h2>Compromissos previstos</h2><div className="table-wrap"><table><thead><tr><th>Status</th><th>Descrição</th><th>Categoria</th><th>Conta</th><th>Forma</th><th>Natureza</th><th>Valor</th><th>Ações</th></tr></thead><tbody>
