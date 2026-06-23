@@ -1,14 +1,11 @@
-# Controle de Gastos Leo v1.1 Final
+# Controle de Gastos Leo v1.1.2
+
+Atualização sem SQL e sem apagar dados.
 
 Inclui:
-- Login com e-mail e senha
-- Receita Prevista e Receita Recebida
-- Compromissos previstos separados de despesas reais
-- Confirmar compromisso e transformar em despesa real
-- Livre para gastar
-- Saldo projetado
-- Média diária só de gastos variáveis reais
-
-## SQL
-Rode o arquivo:
-`supabase/schema_v1_1_final.sql`
+- Saldo por conta
+- Gráficos coloridos
+- Percentual por categoria sobre renda total
+- Disponível / não gasto no gráfico
+- Gráfico diário em ordem cronológica
+- Edição de lançamentos reais
