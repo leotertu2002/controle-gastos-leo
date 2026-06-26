@@ -418,6 +418,7 @@ function App(){
           {!editingCompromisso && compForm.plano === 'Parcelado' && <input placeholder="Quantidade de parcelas" type="number" min="2" step="1" value={compForm.quantidade_parcelas} onChange={e=>setCompForm({...compForm,quantidade_parcelas:e.target.value})} required/>}
         </div><button>{editingCompromisso?'Salvar edição':'Adicionar compromisso'}</button>{editingCompromisso&&<button type="button" className="ghost full" onClick={()=>{setEditingCompromisso(null);setCompForm(emptyCompForm)}}>Cancelar edição</button>}</form>
       </section>
+      </>}
 
       {tab==='analises' && <>
       <section className="layout">
