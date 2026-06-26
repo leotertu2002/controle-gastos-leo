@@ -1,4 +1,3 @@
-# V1.1.4
+# V1.1.5
 
-Esta atualização não precisa de SQL novo.
-Ela altera apenas o código do site e preserva os dados existentes.
+Sem SQL novo. Atualização apenas do código do site.

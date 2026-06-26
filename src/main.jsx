@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createClient } from '@supabase/supabase-js'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts'
-import { Plus, LogOut, Trash2, Download, WalletCards, TrendingUp, CheckCircle2, XCircle, Edit3 } from 'lucide-react'
+import { Plus, LogOut, Trash2, Download, WalletCards, TrendingUp, CheckCircle2, XCircle, Edit3, LayoutDashboard, ClipboardList, BarChart3 } from 'lucide-react'
 import './styles.css'
 
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)
@@ -76,6 +76,7 @@ function App(){
   const c0=cycleFromDate()
   const [session,setSession]=useState(null)
   const [loading,setLoading]=useState(true)
+  const [tab,setTab]=useState('dashboard')
   const [transacoes,setTransacoes]=useState([])
   const [compromissos,setCompromissos]=useState([])
   const [inicioCiclo,setInicioCiclo]=useState(toIso(c0.start))
@@ -86,7 +87,7 @@ function App(){
   const [editingTransacao,setEditingTransacao]=useState(null)
 
   const emptyForm = {data:isoToday(),tipo:'Despesa',categoria:'Alimentação',conta:'Inter',forma:'Débito/PIX',natureza:'Gastos Variáveis',descricao:'',valor:'',parcelamento:'À vista',quantidade_parcelas:2}
-  const emptyCompForm = {descricao:'',categoria:'Outros',conta:'Inter',forma:'Débito/PIX',natureza:'Gastos Fixos',valor_previsto:''}
+  const emptyCompForm = {descricao:'',categoria:'Outros',conta:'Inter',forma:'Débito/PIX',natureza:'Gastos Fixos',valor_previsto:'',plano:'Único',quantidade_parcelas:2}
   const [form,setForm]=useState(emptyForm)
   const [compForm,setCompForm]=useState(emptyCompForm)
 
@@ -196,7 +197,34 @@ function App(){
     e.preventDefault()
     const valor=Number(String(compForm.valor_previsto).replace(',','.'))
     if(!valor||valor<=0) return alert('Informe um valor previsto válido.')
-    const payload={...compForm,valor_previsto:valor,ciclo_inicio:inicioCiclo,ciclo_fim:fimCiclo,user_id:session.user.id}
+
+    const qtd = Math.max(1, Number(compForm.quantidade_parcelas || 1))
+    if(!editingCompromisso && compForm.plano === 'Parcelado' && qtd > 1){
+      try {
+        const rows = []
+        for(let i=0; i<qtd; i++){
+          const ciclo = nextCycleFromStart(inicioCiclo, i)
+          rows.push({
+            user_id: session.user.id,
+            ciclo_inicio: ciclo.start,
+            ciclo_fim: ciclo.end,
+            descricao: `${compForm.descricao} (${i+1}/${qtd})`,
+            categoria: compForm.categoria,
+            conta: compForm.conta,
+            forma: compForm.forma,
+            natureza: compForm.natureza,
+            valor_previsto: valor,
+            status: 'Previsto'
+          })
+        }
+        const {error}=await supabase.from('compromissos').insert(rows)
+        if(error) throw error
+        setCompForm(emptyCompForm); carregar(); return
+      } catch(error){ alert(error.message); return }
+    }
+
+    const {plano, quantidade_parcelas, ...compSemPlano} = compForm
+    const payload={...compSemPlano,valor_previsto:valor,ciclo_inicio:inicioCiclo,ciclo_fim:fimCiclo,user_id:session.user.id}
     const result = editingCompromisso
       ? await supabase.from('compromissos').update(payload).eq('id',editingCompromisso.id)
       : await supabase.from('compromissos').insert(payload)
@@ -205,7 +233,7 @@ function App(){
   }
   function editarCompromisso(c){
     setEditingCompromisso(c)
-    setCompForm({descricao:c.descricao,categoria:c.categoria,conta:c.conta,forma:c.forma,natureza:c.natureza,valor_previsto:c.valor_previsto})
+    setCompForm({descricao:c.descricao,categoria:c.categoria,conta:c.conta,forma:c.forma,natureza:c.natureza,valor_previsto:c.valor_previsto,plano:'Único',quantidade_parcelas:2})
   }
   async function confirmarCompromisso(c){
     const raw=prompt('Valor confirmado:',Number(c.valor_previsto).toFixed(2).replace('.',','))
@@ -258,7 +286,8 @@ function App(){
     const mediaVariavelDia=gastosVariaveis/Math.max(1,diasPassados)
     const projecaoVariavelRestante=mediaVariavelDia*diasRestantes
     const saldoProjetado=livreParaGastar-projecaoVariavelRestante
-    return {receitaPrevista,receitaRecebida,receitaTotal,despesas,investimentos,pagamentosFatura,gastosVariaveis,credito,debitoPixDisponivel,compromissosPrevistos,reservaAporte,livreParaGastar,diasRestantes,mediaVariavelDia,projecaoVariavelRestante,saldoProjetado}
+    const mediaPermitidaDia=diasRestantes>0 ? Math.max(0, livreParaGastar)/diasRestantes : Math.max(0, livreParaGastar)
+    return {mediaPermitidaDia,receitaPrevista,receitaRecebida,receitaTotal,despesas,investimentos,pagamentosFatura,gastosVariaveis,credito,debitoPixDisponivel,compromissosPrevistos,reservaAporte,livreParaGastar,diasRestantes,mediaVariavelDia,projecaoVariavelRestante,saldoProjetado}
   },[transacoes,compromissos,metaAporte,saldoInicialPix,inicioCiclo,fimCiclo])
 
   const gastosReais = transacoes.filter(t=>['Despesa','Investimento','Pagamento Fatura'].includes(t.tipo))
@@ -324,11 +353,18 @@ function App(){
         <button className="ghost" onClick={exportarCSV}><Download size={16}/> Exportar CSV</button>
       </section>
 
+      <nav className="tabs">
+        <button className={tab==='dashboard'?'active':''} onClick={()=>setTab('dashboard')}><LayoutDashboard size={16}/> Dashboard</button>
+        <button className={tab==='lancamentos'?'active':''} onClick={()=>setTab('lancamentos')}><ClipboardList size={16}/> Lançamentos</button>
+        <button className={tab==='analises'?'active':''} onClick={()=>setTab('analises')}><BarChart3 size={16}/> Análises</button>
+      </nav>
+
       <section className="settings-row">
         <div className="mini-setting"><span>Saldo inicial PIX/Débito</span><input type="number" step="0.01" value={saldoInicialPix} onChange={e=>setSaldoInicialPix(Number(e.target.value||0))}/></div>
         <div className="mini-setting"><span>Meta mensal de aporte</span><input type="number" step="0.01" value={metaAporte} onChange={e=>setMetaAporte(Number(e.target.value||0))}/></div>
       </section>
 
+      {tab==='dashboard' && <>
       <section className="cards">
         <div className="card"><span>Receita prevista</span><strong className="green">{money(dash.receitaPrevista)}</strong></div>
         <div className="card"><span>Receita recebida extra</span><strong className="green">{money(dash.receitaRecebida)}</strong></div>
@@ -344,8 +380,15 @@ function App(){
         <div className="card"><span>Débito/PIX disponível</span><strong className={dash.debitoPixDisponivel>=0?'green':'red'}>{money(dash.debitoPixDisponivel)}</strong></div>
       </section>
 
-      <section className="projection"><div><h2><TrendingUp size={19}/> Projeção do ciclo</h2><p>Média de gasto variável real: <b>{money(dash.mediaVariavelDia)}/dia</b>. Faltam <b>{dash.diasRestantes}</b> dias. Projeção variável restante: <b>{money(dash.projecaoVariavelRestante)}</b>.</p></div><div className={dash.saldoProjetado>=0?'projection-number green':'projection-number red'}><span>Saldo projetado</span><strong>{money(dash.saldoProjetado)}</strong></div></section>
+      <section className="projection"><div><h2><TrendingUp size={19}/> Projeção do ciclo</h2><p>Média de gasto variável real: <b>{money(dash.mediaVariavelDia)}/dia</b>. Para manter o planejamento, sua média variável permitida é <b>{money(dash.mediaPermitidaDia)}/dia</b>. Faltam <b>{dash.diasRestantes}</b> dias.</p></div><div className={dash.saldoProjetado>=0?'projection-number green':'projection-number red'}><span>Saldo projetado</span><strong>{money(dash.saldoProjetado)}</strong></div></section>
 
+      <section className="layout">
+        <div className="panel"><h2>Faturas por cartão</h2><div className="simple-list">{faturas.map((f,i)=><div key={f.conta}><span><b className="dot" style={{background:COLORS[i]}}></b>{f.conta}</span><b>{money(f.valor)}</b></div>)}</div></div>
+        <div className="panel"><h2>Saldo por conta</h2><div className="simple-list">{saldoPorConta.map((s,i)=><div key={s.conta}><span><b className="dot" style={{background:COLORS[i+3]}}></b>{s.conta}</span><b className={s.valor>=0?'green':'red'}>{money(s.valor)}</b></div>)}</div><p className="chart-note">Considera apenas Receita Recebida e saídas em Débito/PIX.</p></div>
+      </section>
+      </>}
+
+      {tab==='lancamentos' && <>
       <section className="layout">
         <form className="panel form" onSubmit={adicionar}><h2><Plus size={18}/> {editingTransacao?'Editar lançamento real':'Novo lançamento real'}</h2><div className="form-grid">
           <input type="date" value={form.data} onChange={e=>setForm({...form,data:e.target.value})} required/>
@@ -371,9 +414,12 @@ function App(){
           <select value={compForm.conta} onChange={e=>setCompForm({...compForm,conta:e.target.value})}>{CONTAS.map(x=><option key={x}>{x}</option>)}</select>
           <select value={compForm.forma} onChange={e=>setCompForm({...compForm,forma:e.target.value})}>{FORMAS.map(x=><option key={x}>{x}</option>)}</select>
           <select value={compForm.natureza} onChange={e=>setCompForm({...compForm,natureza:e.target.value})}>{NATUREZAS.map(x=><option key={x}>{x}</option>)}</select>
+          {!editingCompromisso && <select value={compForm.plano} onChange={e=>setCompForm({...compForm,plano:e.target.value})}><option>Único</option><option>Parcelado</option></select>}
+          {!editingCompromisso && compForm.plano === 'Parcelado' && <input placeholder="Quantidade de parcelas" type="number" min="2" step="1" value={compForm.quantidade_parcelas} onChange={e=>setCompForm({...compForm,quantidade_parcelas:e.target.value})} required/>}
         </div><button>{editingCompromisso?'Salvar edição':'Adicionar compromisso'}</button>{editingCompromisso&&<button type="button" className="ghost full" onClick={()=>{setEditingCompromisso(null);setCompForm(emptyCompForm)}}>Cancelar edição</button>}</form>
       </section>
 
+      {tab==='analises' && <>
       <section className="layout">
         <div className="panel"><h2>Gastos reais por categoria</h2><div className="chart"><ResponsiveContainer width="100%" height={280}><PieChart><Pie data={porCategoria} dataKey="valor" nameKey="categoria" outerRadius={100} label={false}>{porCategoria.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}</Pie><Tooltip formatter={(v,n)=>[money(v), `${n} • ${pct(v,dash.receitaTotal+saldoInicialPix)}`]}/></PieChart></ResponsiveContainer></div><p className="chart-note">Passe o mouse sobre o gráfico para ver valores. A legenda detalhada fica no resumo por categoria.</p></div>
         <div className="panel"><h2>Gastos variáveis por dia</h2><div className="chart"><ResponsiveContainer width="100%" height={280}><LineChart data={porDiaVariavel}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="dia"/><YAxis/><Tooltip formatter={(v)=>money(v)}/><Line type="monotone" dataKey="valor" strokeWidth={3} dot stroke="#60a5fa"/></LineChart></ResponsiveContainer></div></div>
@@ -393,7 +439,9 @@ function App(){
         <div className="panel"><h2>Gastos fixos x variáveis</h2><div className="chart"><ResponsiveContainer width="100%" height={240}><BarChart data={fixosVariaveis}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="natureza"/><YAxis/><Tooltip formatter={(v)=>money(v)}/><Bar dataKey="valor" radius={[8,8,0,0]}>{fixosVariaveis.map((_,i)=><Cell key={i} fill={COLORS[i+4]}/>)}</Bar></BarChart></ResponsiveContainer></div></div>
         <div className="panel"><h2>Resumo fixos x variáveis</h2><div className="simple-list">{fixosVariaveis.map((n,i)=><div key={n.natureza}><span><b className="dot" style={{background:COLORS[i+4]}}></b>{n.natureza}</span><b>{money(n.valor)} • {pct(n.valor,dash.receitaTotal+saldoInicialPix)}</b></div>)}</div></div>
       </section>
+      </>}
 
+      {tab==='lancamentos' && <>
       <section className="panel"><h2>Compromissos previstos</h2><div className="table-wrap"><table><thead><tr><th>Status</th><th>Descrição</th><th>Categoria</th><th>Conta</th><th>Forma</th><th>Natureza</th><th>Valor</th><th>Ações</th></tr></thead><tbody>
         {compromissos.map(c=><tr key={c.id} className={c.status!=='Previsto'?'muted-row':''}><td>{c.status}</td><td>{c.descricao}</td><td>{c.categoria}</td><td>{c.conta}</td><td>{c.forma}</td><td>{c.natureza}</td><td>{money(c.valor_previsto)}</td><td className="actions">{c.status==='Previsto'&&<button onClick={()=>confirmarCompromisso(c)}><CheckCircle2 size={15}/></button>}{c.status==='Previsto'&&<button onClick={()=>editarCompromisso(c)}><Edit3 size={15}/></button>}{c.status==='Previsto'&&<button onClick={()=>cancelarCompromisso(c)}><XCircle size={15}/></button>}<button className="danger" onClick={()=>excluirCompromisso(c.id)}><Trash2 size={14}/></button></td></tr>)}
         {compromissos.length===0&&<tr><td colSpan="8" className="empty">Nenhum compromisso previsto neste ciclo.</td></tr>}
@@ -403,6 +451,7 @@ function App(){
         {transacoes.map(t=><tr key={t.id}><td>{formatBR(t.data)}</td><td>{t.tipo}</td><td>{t.categoria}</td><td>{t.conta}</td><td>{t.forma}</td><td>{t.natureza}</td><td>{t.descricao}</td><td>{money(t.valor)}</td><td className="actions"><button onClick={()=>editarTransacao(t)}><Edit3 size={14}/></button><button className="danger" onClick={()=>excluir(t.id)}><Trash2 size={14}/></button></td></tr>)}
         {transacoes.length===0&&<tr><td colSpan="9" className="empty">Nenhum lançamento real neste ciclo.</td></tr>}
       </tbody></table></div></section>
+      </>}
     </main>
   </div>
 }
