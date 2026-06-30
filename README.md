@@ -1,12 +1,16 @@
-# Leo Finance V1.2
+# Leo Finance V1.2.1
 
 Atualização sem SQL e sem apagar dados.
 
 Inclui:
-- Dashboard com Caixa Disponível como card principal
-- Remoção do saldo inicial PIX/Débito
-- Pagamento de fatura fora dos gráficos de consumo e da fatura atual
-- Recorrente sem prazo sem pedir parcelas
-- Compromisso previsto: Único, Parcelado e Recorrente
-- Nova aba Planejamento com simulação do próximo ciclo
-- Fatura estimada manual, com referências automáticas
+- Calendário do ciclo na aba Análises
+- Filtros avançados em Lançamentos
+- Ordenação dos lançamentos
+- Resumo dos filtros
+- Duplicar lançamento
+- Textos explicativos no Dashboard
+- Recomendações do ciclo
+- Explicação da projeção do ciclo
+
+## Deploy
+Subir os arquivos no GitHub. A Vercel publica automaticamente.

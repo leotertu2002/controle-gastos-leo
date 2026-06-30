@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createClient } from '@supabase/supabase-js'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts'
-import { Plus, LogOut, Trash2, Download, WalletCards, TrendingUp, CheckCircle2, XCircle, Edit3, LayoutDashboard, ClipboardList, BarChart3, Calculator } from 'lucide-react'
+import { Plus, LogOut, Trash2, Download, WalletCards, TrendingUp, CheckCircle2, XCircle, Edit3, LayoutDashboard, ClipboardList, BarChart3, Calculator, Copy } from 'lucide-react'
 import './styles.css'
 
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)
@@ -100,6 +100,9 @@ function App(){
     aporteMinimo: localStorage.getItem('planejamento_aporteMinimo') || localStorage.getItem('metaAporteLeo') || '600',
     caixaDesejado: localStorage.getItem('planejamento_caixaDesejado') || ''
   })
+
+  const emptyFiltros = {dataInicio:'', dataFim:'', tipo:'Todos', conta:'Todas', forma:'Todas', natureza:'Todas', categoria:'Todas', busca:'', ordenacao:'recentes'}
+  const [filtros,setFiltros]=useState(emptyFiltros)
 
   useEffect(()=>{
     supabase.auth.getSession().then(({data})=>{setSession(data.session);setLoading(false)})
@@ -204,6 +207,24 @@ function App(){
     setEditingTransacao(t)
     setTab('lancamentos')
     setForm({data:t.data,tipo:t.tipo,categoria:t.categoria,conta:t.conta,forma:t.forma,natureza:t.natureza,descricao:t.descricao,valor:t.valor,parcelamento:'À vista',quantidade_parcelas:2})
+    window.scrollTo({top:0, behavior:'smooth'})
+  }
+
+  function duplicarTransacao(t){
+    setEditingTransacao(null)
+    setTab('lancamentos')
+    setForm({
+      data: isoToday(),
+      tipo: t.tipo,
+      categoria: t.categoria,
+      conta: t.conta,
+      forma: t.forma,
+      natureza: t.natureza,
+      descricao: t.descricao,
+      valor: t.valor,
+      parcelamento:'À vista',
+      quantidade_parcelas:2
+    })
     window.scrollTo({top:0, behavior:'smooth'})
   }
   async function excluir(id){
@@ -317,7 +338,20 @@ function App(){
     const ritmoEsperado = diasTotal > 0 ? (caixaDisponivel + gastosVariaveis) * (diasPassados/diasTotal) : gastosVariaveis
     const diferencaRitmo = ritmoEsperado - gastosVariaveis
     const situacao = caixaDisponivel <= 0 ? 'Crítico' : diferencaRitmo >= 0 ? 'Dentro do planejado' : 'Atenção'
-    return {mediaPermitidaDia,receitaPrevista,receitaRecebida,receitaTotal,despesas,investimentos,pagamentosFatura,gastosVariaveis,credito,caixaDisponivel,compromissosPrevistos,reservaAporte,diasRestantes,mediaVariavelDia,projecaoVariavelRestante,saldoProjetado,situacao}
+    const situacaoDescricao = situacao === 'Crítico'
+      ? 'Seu caixa operacional está zerado ou negativo. Evite novos gastos no débito/PIX e avalie se será necessário resgatar ou reduzir despesas.'
+      : situacao === 'Atenção'
+        ? 'Seu ritmo de gastos está acima do esperado para o caixa disponível. Reduzir gastos variáveis ajuda a preservar o planejamento.'
+        : 'Seu ritmo atual está compatível com o caixa disponível para o ciclo.'
+    const saldoProjetadoDescricao = saldoProjetado < 0
+      ? `Mantendo a média atual de gastos variáveis, podem faltar aproximadamente ${money(Math.abs(saldoProjetado))} até o fim do ciclo.`
+      : `Mantendo a média atual de gastos variáveis, você pode encerrar o ciclo com cerca de ${money(saldoProjetado)} em caixa.`
+    const recomendacoes = []
+    if(receitaPrevista === 0) recomendacoes.push('A projeção pode ficar distorcida até você lançar a receita prevista do próximo ciclo.')
+    if(saldoProjetado < 0) recomendacoes.push(`Reduza gastos variáveis ou considere um resgate de aproximadamente ${money(Math.abs(saldoProjetado))} se quiser manter o ritmo atual.`)
+    if(mediaVariavelDia > mediaPermitidaDia && mediaPermitidaDia > 0) recomendacoes.push(`Sua média variável atual está acima da meta diária. Tente ficar próximo de ${money(mediaPermitidaDia)}/dia.`)
+    if(saldoProjetado >= 0 && caixaDisponivel > 0) recomendacoes.push('Você está com caixa positivo. Continue acompanhando o ritmo para preservar o planejamento.')
+    return {mediaPermitidaDia,receitaPrevista,receitaRecebida,receitaTotal,despesas,investimentos,pagamentosFatura,gastosVariaveis,credito,caixaDisponivel,compromissosPrevistos,reservaAporte,diasRestantes,mediaVariavelDia,projecaoVariavelRestante,saldoProjetado,situacao,situacaoDescricao,saldoProjetadoDescricao,recomendacoes}
   },[transacoes,compromissos,metaAporte,inicioCiclo,fimCiclo,saldoPorConta])
 
   const gastosReais = transacoes.filter(t=>['Despesa','Investimento'].includes(t.tipo))
@@ -373,6 +407,60 @@ function App(){
     return {receitas,fatura,aporte,caixaDesejado,proximo,compromissosProximo,sobraAntesCaixa,resgateNecessario,aporteExtra,metaDiaria,compromissosCredito,saude}
   },[planejamento,compromissos,inicioCiclo])
 
+
+  const transacoesFiltradas=useMemo(()=>{
+    let arr=[...transacoes]
+    if(filtros.dataInicio) arr=arr.filter(t=>t.data>=filtros.dataInicio)
+    if(filtros.dataFim) arr=arr.filter(t=>t.data<=filtros.dataFim)
+    if(filtros.tipo!=='Todos') arr=arr.filter(t=>t.tipo===filtros.tipo)
+    if(filtros.conta!=='Todas') arr=arr.filter(t=>t.conta===filtros.conta)
+    if(filtros.forma!=='Todas') arr=arr.filter(t=>t.forma===filtros.forma)
+    if(filtros.natureza!=='Todas') arr=arr.filter(t=>t.natureza===filtros.natureza)
+    if(filtros.categoria!=='Todas') arr=arr.filter(t=>t.categoria===filtros.categoria)
+    if(filtros.busca.trim()){
+      const q=filtros.busca.trim().toLowerCase()
+      arr=arr.filter(t=>String(t.descricao||'').toLowerCase().includes(q))
+    }
+    arr.sort((a,b)=>{
+      if(filtros.ordenacao==='antigos') return a.data.localeCompare(b.data)
+      if(filtros.ordenacao==='maior') return Number(b.valor)-Number(a.valor)
+      if(filtros.ordenacao==='menor') return Number(a.valor)-Number(b.valor)
+      return b.data.localeCompare(a.data)
+    })
+    return arr
+  },[transacoes,filtros])
+
+  const resumoFiltros=useMemo(()=>{
+    const somaTipo=(tipo)=>transacoesFiltradas.filter(t=>t.tipo===tipo).reduce((s,t)=>s+Number(t.valor),0)
+    return {
+      quantidade: transacoesFiltradas.length,
+      receitas: somaTipo('Receita Recebida') + somaTipo('Receita Prevista'),
+      despesas: somaTipo('Despesa'),
+      investimentos: somaTipo('Investimento'),
+      faturas: somaTipo('Pagamento Fatura')
+    }
+  },[transacoesFiltradas])
+
+  const calendarioCiclo=useMemo(()=>{
+    const dias=[]
+    const inicio=new Date(inicioCiclo+'T00:00:00')
+    const fim=new Date(fimCiclo+'T00:00:00')
+    for(let d=new Date(inicio); d<=fim; d.setDate(d.getDate()+1)){
+      const iso=toIso(new Date(d))
+      const gastosDoDia=transacoes.filter(t=>t.data===iso && t.tipo==='Despesa')
+      const total=gastosDoDia.reduce((s,t)=>s+Number(t.valor),0)
+      const maior=gastosDoDia.reduce((m,t)=>Number(t.valor)>Number(m?.valor||0)?t:m,null)
+      let nivel='cal-neutral'
+      if(total>200) nivel='cal-red-strong'
+      else if(total>100) nivel='cal-red-dark'
+      else if(total>50) nivel='cal-red-light'
+      dias.push({data:iso, dia:String(new Date(d).getDate()).padStart(2,'0'), total, maior, nivel})
+    }
+    return dias
+  },[transacoes,inicioCiclo,fimCiclo])
+
+  function limparFiltros(){ setFiltros(emptyFiltros) }
+
   function exportarCSV(){
     const linhas=[['Data','Tipo','Categoria','Conta','Forma','Natureza','Descrição','Valor']]
     transacoes.forEach(t=>linhas.push([t.data,t.tipo,t.categoria,t.conta,t.forma,t.natureza,t.descricao,t.valor]))
@@ -416,10 +504,11 @@ function App(){
         <section className="cards">
           <div className="card"><span>Compromissos previstos</span><strong>{money(dash.compromissosPrevistos)}</strong></div>
           <div className="card"><span>Dias restantes</span><strong>{dash.diasRestantes}</strong></div>
-          <div className="card"><span>Situação do ciclo</span><strong className={dash.situacao==='Crítico'?'red':dash.situacao==='Atenção'?'':'green'}>{dash.situacao}</strong></div>
+          <div className="card"><span>Situação do ciclo</span><strong className={dash.situacao==='Crítico'?'red':dash.situacao==='Atenção'?'':'green'}>{dash.situacao}</strong><small>{dash.situacaoDescricao}</small></div>
           <div className="card"><span>Investido no ciclo</span><strong>{money(dash.investimentos)}</strong><small>Reserva aporte: {money(dash.reservaAporte)}</small></div>
         </section>
-        <section className="projection"><div><h2><TrendingUp size={19}/> Projeção do ciclo</h2><p>Média variável real: <b>{money(dash.mediaVariavelDia)}/dia</b>. Meta diária atual: <b>{money(dash.mediaPermitidaDia)}/dia</b>. Faltam <b>{dash.diasRestantes}</b> dias.</p></div><div className={dash.saldoProjetado>=0?'projection-number green':'projection-number red'}><span>Saldo projetado</span><strong>{money(dash.saldoProjetado)}</strong></div></section>
+        <section className="projection"><div><h2><TrendingUp size={19}/> Projeção do ciclo</h2><p>Média variável real: <b>{money(dash.mediaVariavelDia)}/dia</b>. Meta diária atual: <b>{money(dash.mediaPermitidaDia)}/dia</b>. Faltam <b>{dash.diasRestantes}</b> dias.</p><p className="chart-note">{dash.saldoProjetadoDescricao}</p></div><div className={dash.saldoProjetado>=0?'projection-number green':'projection-number red'}><span>Saldo projetado</span><strong>{money(dash.saldoProjetado)}</strong></div></section>
+        <section className="panel"><h2>Recomendações do ciclo</h2><div className="recommendations">{dash.recomendacoes.map((r,i)=><div key={i}>{r}</div>)}</div></section>
         <section className="layout">
           <div className="panel"><h2>Faturas por cartão</h2><div className="simple-list">{faturas.map((f,i)=><div key={f.conta}><span><b className="dot" style={{background:COLORS[i]}}></b>{f.conta}</span><b>{money(f.valor)}</b></div>)}</div></div>
           <div className="panel"><h2>Saldo por conta</h2><div className="simple-list">{saldoPorConta.map((s,i)=><div key={s.conta}><span><b className="dot" style={{background:COLORS[i+3]}}></b>{s.conta}</span><b className={s.valor>=0?'green':'red'}>{money(s.valor)}</b></div>)}</div><p className="chart-note">Considera apenas Receita Recebida e saídas em Débito/PIX.</p></div>
@@ -456,9 +545,21 @@ function App(){
           {compromissos.map(c=><tr key={c.id} className={c.status!=='Previsto'?'muted-row':''}><td>{c.status}</td><td>{c.descricao}</td><td>{c.categoria}</td><td>{c.conta}</td><td>{c.forma}</td><td>{c.natureza}</td><td>{money(c.valor_previsto)}</td><td className="actions">{c.status==='Previsto'&&<button onClick={()=>confirmarCompromisso(c)}><CheckCircle2 size={15}/></button>}{c.status==='Previsto'&&<button onClick={()=>editarCompromisso(c)}><Edit3 size={15}/></button>}{c.status==='Previsto'&&<button onClick={()=>cancelarCompromisso(c)}><XCircle size={15}/></button>}<button className="danger" onClick={()=>excluirCompromisso(c.id)}><Trash2 size={14}/></button></td></tr>)}
           {compromissos.length===0&&<tr><td colSpan="8" className="empty">Nenhum compromisso previsto neste ciclo.</td></tr>}
         </tbody></table></div></section>
+        <section className="panel"><h2>Filtros dos lançamentos</h2><div className="filter-grid">
+          <input type="date" value={filtros.dataInicio} onChange={e=>setFiltros({...filtros,dataInicio:e.target.value})}/>
+          <input type="date" value={filtros.dataFim} onChange={e=>setFiltros({...filtros,dataFim:e.target.value})}/>
+          <select value={filtros.tipo} onChange={e=>setFiltros({...filtros,tipo:e.target.value})}><option>Todos</option>{TIPOS.map(x=><option key={x}>{x}</option>)}</select>
+          <select value={filtros.conta} onChange={e=>setFiltros({...filtros,conta:e.target.value})}><option>Todas</option>{CONTAS.map(x=><option key={x}>{x}</option>)}</select>
+          <select value={filtros.forma} onChange={e=>setFiltros({...filtros,forma:e.target.value})}><option>Todas</option>{FORMAS.map(x=><option key={x}>{x}</option>)}</select>
+          <select value={filtros.natureza} onChange={e=>setFiltros({...filtros,natureza:e.target.value})}><option>Todas</option>{NATUREZAS.map(x=><option key={x}>{x}</option>)}</select>
+          <select value={filtros.categoria} onChange={e=>setFiltros({...filtros,categoria:e.target.value})}><option>Todas</option>{CATEGORIAS.map(x=><option key={x}>{x}</option>)}</select>
+          <select value={filtros.ordenacao} onChange={e=>setFiltros({...filtros,ordenacao:e.target.value})}><option value="recentes">Mais recentes</option><option value="antigos">Mais antigos</option><option value="maior">Maior valor</option><option value="menor">Menor valor</option></select>
+          <input placeholder="Buscar descrição" value={filtros.busca} onChange={e=>setFiltros({...filtros,busca:e.target.value})}/>
+          <button className="ghost" type="button" onClick={limparFiltros}>Limpar filtros</button>
+        </div><div className="summary-row"><span>{resumoFiltros.quantidade} lançamentos</span><span>Receitas: {money(resumoFiltros.receitas)}</span><span>Despesas: {money(resumoFiltros.despesas)}</span><span>Investimentos: {money(resumoFiltros.investimentos)}</span><span>Faturas: {money(resumoFiltros.faturas)}</span></div></section>
         <section className="panel"><h2>Lançamentos reais do ciclo</h2><div className="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Conta</th><th>Forma</th><th>Natureza</th><th>Descrição</th><th>Valor</th><th>Ações</th></tr></thead><tbody>
-          {transacoes.map(t=><tr key={t.id}><td>{formatBR(t.data)}</td><td>{t.tipo}</td><td>{t.categoria}</td><td>{t.conta}</td><td>{t.forma}</td><td>{t.natureza}</td><td>{t.descricao}</td><td>{money(t.valor)}</td><td className="actions"><button onClick={()=>editarTransacao(t)}><Edit3 size={14}/></button><button className="danger" onClick={()=>excluir(t.id)}><Trash2 size={14}/></button></td></tr>)}
-          {transacoes.length===0&&<tr><td colSpan="9" className="empty">Nenhum lançamento real neste ciclo.</td></tr>}
+          {transacoesFiltradas.map(t=><tr key={t.id}><td>{formatBR(t.data)}</td><td>{t.tipo}</td><td>{t.categoria}</td><td>{t.conta}</td><td>{t.forma}</td><td>{t.natureza}</td><td>{t.descricao}</td><td>{money(t.valor)}</td><td className="actions"><button title="Editar" onClick={()=>editarTransacao(t)}><Edit3 size={14}/></button><button title="Duplicar" onClick={()=>duplicarTransacao(t)}><Copy size={14}/></button><button className="danger" title="Excluir" onClick={()=>excluir(t.id)}><Trash2 size={14}/></button></td></tr>)}
+          {transacoesFiltradas.length===0&&<tr><td colSpan="9" className="empty">Nenhum lançamento encontrado com os filtros atuais.</td></tr>}
         </tbody></table></div></section>
       </>}
 
@@ -495,6 +596,9 @@ function App(){
       </>}
 
       {tab==='analises' && <>
+        <section className="panel"><h2>Calendário do ciclo</h2><div className="calendar-grid">
+          {calendarioCiclo.map(d=><div key={d.data} className={`calendar-day ${d.nivel}`} title={`${formatBR(d.data)} • Total: ${money(d.total)}${d.maior ? ` • Maior gasto: ${d.maior.descricao} - ${money(d.maior.valor)}` : ''}`}><strong>{d.dia}</strong><span>{money(d.total)}</span></div>)}
+        </div><p className="chart-note">Cores por gasto diário: acima de R$ 50, R$ 100 e R$ 200. O total considera despesas reais do dia.</p></section>
         <section className="layout">
           <div className="panel"><h2>Gastos reais por categoria</h2><div className="chart"><ResponsiveContainer width="100%" height={280}><PieChart><Pie data={porCategoria} dataKey="valor" nameKey="categoria" outerRadius={100} label={false}>{porCategoria.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}</Pie><Tooltip formatter={(v,n)=>[money(v), `${n} • ${pct(v,dash.receitaTotal)}`]}/></PieChart></ResponsiveContainer></div><p className="chart-note">Passe o mouse sobre o gráfico para ver valores. A legenda detalhada fica no resumo por categoria.</p></div>
           <div className="panel"><h2>Gastos variáveis por dia</h2><div className="chart"><ResponsiveContainer width="100%" height={280}><LineChart data={porDiaVariavel}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="dia"/><YAxis/><Tooltip formatter={(v)=>money(v)}/><Line type="monotone" dataKey="valor" strokeWidth={3} dot stroke="#60a5fa"/></LineChart></ResponsiveContainer></div></div>
