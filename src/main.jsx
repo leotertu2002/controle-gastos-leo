@@ -442,21 +442,37 @@ function App(){
   },[transacoesFiltradas])
 
   const calendarioCiclo=useMemo(()=>{
-    const dias=[]
+    const cells=[]
     const inicio=new Date(inicioCiclo+'T00:00:00')
     const fim=new Date(fimCiclo+'T00:00:00')
+    const primeiroDiaSemana=inicio.getDay() // 0 domingo, 1 segunda...
+    const ordemVisual=[0,1,2,3,4,5,6] // Dom, Seg, Ter, Qua, Qui, Sex, Sáb
+
+    for(let i=0;i<primeiroDiaSemana;i++){
+      cells.push({blank:true, key:`blank-${i}`})
+    }
+
     for(let d=new Date(inicio); d<=fim; d.setDate(d.getDate()+1)){
       const iso=toIso(new Date(d))
-      const gastosDoDia=transacoes.filter(t=>t.data===iso && t.tipo==='Despesa')
+      const gastosDoDia=transacoes.filter(t=>t.data===iso && t.tipo==='Despesa' && t.natureza==='Gastos Variáveis')
       const total=gastosDoDia.reduce((s,t)=>s+Number(t.valor),0)
       const maior=gastosDoDia.reduce((m,t)=>Number(t.valor)>Number(m?.valor||0)?t:m,null)
       let nivel='cal-neutral'
       if(total>200) nivel='cal-red-strong'
       else if(total>100) nivel='cal-red-dark'
       else if(total>50) nivel='cal-red-light'
-      dias.push({data:iso, dia:String(new Date(d).getDate()).padStart(2,'0'), total, maior, nivel})
+      cells.push({
+        data:iso,
+        key:iso,
+        dia:String(new Date(d).getDate()).padStart(2,'0'),
+        semana:['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][new Date(d).getDay()],
+        total,
+        quantidade:gastosDoDia.length,
+        maior,
+        nivel
+      })
     }
-    return dias
+    return cells
   },[transacoes,inicioCiclo,fimCiclo])
 
   function limparFiltros(){ setFiltros(emptyFiltros) }
@@ -489,10 +505,6 @@ function App(){
         <button className={tab==='planejamento'?'active':''} onClick={()=>setTab('planejamento')}><Calculator size={16}/> Planejamento</button>
         <button className={tab==='analises'?'active':''} onClick={()=>setTab('analises')}><BarChart3 size={16}/> Análises</button>
       </nav>
-
-      <section className="settings-row">
-        <div className="mini-setting"><span>Meta mensal de aporte</span><input type="number" step="0.01" value={metaAporte} onChange={e=>setMetaAporte(Number(e.target.value||0))}/></div>
-      </section>
 
       {tab==='dashboard' && <>
         <section className="cards">
@@ -596,9 +608,14 @@ function App(){
       </>}
 
       {tab==='analises' && <>
-        <section className="panel"><h2>Calendário do ciclo</h2><div className="calendar-grid">
-          {calendarioCiclo.map(d=><div key={d.data} className={`calendar-day ${d.nivel}`} title={`${formatBR(d.data)} • Total: ${money(d.total)}${d.maior ? ` • Maior gasto: ${d.maior.descricao} - ${money(d.maior.valor)}` : ''}`}><strong>{d.dia}</strong><span>{money(d.total)}</span></div>)}
-        </div><p className="chart-note">Cores por gasto diário: acima de R$ 50, R$ 100 e R$ 200. O total considera despesas reais do dia.</p></section>
+        <section className="panel"><h2>Calendário do ciclo</h2>
+          <div className="calendar-weekdays"><span>Dom</span><span>Seg</span><span>Ter</span><span>Qua</span><span>Qui</span><span>Sex</span><span>Sáb</span></div>
+          <div className="calendar-grid">
+          {calendarioCiclo.map(d=>d.blank
+            ? <div key={d.key} className="calendar-day calendar-blank"></div>
+            : <div key={d.key} className={`calendar-day ${d.nivel}`} title={`${formatBR(d.data)} (${d.semana}) • Gastos variáveis: ${money(d.total)} • ${d.quantidade} lançamento(s)${d.maior ? ` • Maior gasto: ${d.maior.descricao} - ${money(d.maior.valor)}` : ''}`}><strong>{d.dia}</strong><small>{d.semana}</small><span>{money(d.total)}</span></div>
+          )}
+        </div><p className="chart-note">Cores por gasto variável diário: acima de R$ 50, R$ 100 e R$ 200. O total considera apenas despesas reais marcadas como Gastos Variáveis.</p></section>
         <section className="layout">
           <div className="panel"><h2>Gastos reais por categoria</h2><div className="chart"><ResponsiveContainer width="100%" height={280}><PieChart><Pie data={porCategoria} dataKey="valor" nameKey="categoria" outerRadius={100} label={false}>{porCategoria.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}</Pie><Tooltip formatter={(v,n)=>[money(v), `${n} • ${pct(v,dash.receitaTotal)}`]}/></PieChart></ResponsiveContainer></div><p className="chart-note">Passe o mouse sobre o gráfico para ver valores. A legenda detalhada fica no resumo por categoria.</p></div>
           <div className="panel"><h2>Gastos variáveis por dia</h2><div className="chart"><ResponsiveContainer width="100%" height={280}><LineChart data={porDiaVariavel}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="dia"/><YAxis/><Tooltip formatter={(v)=>money(v)}/><Line type="monotone" dataKey="valor" strokeWidth={3} dot stroke="#60a5fa"/></LineChart></ResponsiveContainer></div></div>
