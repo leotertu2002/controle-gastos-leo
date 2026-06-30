@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createClient } from '@supabase/supabase-js'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts'
-import { Plus, LogOut, Trash2, Download, WalletCards, TrendingUp, CheckCircle2, XCircle, Edit3, LayoutDashboard, ClipboardList, BarChart3, Calculator, Copy } from 'lucide-react'
+import { Plus, LogOut, Trash2, Download, WalletCards, TrendingUp, CheckCircle2, XCircle, Edit3, LayoutDashboard, ClipboardList, BarChart3, Calculator, Copy, Search, Settings, FileDown, ChevronDown } from 'lucide-react'
 import './styles.css'
 
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)
@@ -41,6 +41,9 @@ function diffDaysInclusive(a,b){
   return Math.max(1, Math.floor((y-x)/86400000)+1)
 }
 function parseNumber(v){ return Number(String(v || 0).replace(',','.')) || 0 }
+function safeJSON(key, fallback){
+  try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback }
+}
 
 function AuthScreen(){
   const [mode,setMode]=useState('login')
@@ -104,12 +107,15 @@ function App(){
   })
 
   const emptyFiltros = {dataInicio:'', dataFim:'', tipo:'Todos', conta:'Todas', forma:'Todas', natureza:'Todas', categoria:'Todas', busca:'', ordenacao:'recentes'}
-  const [filtros,setFiltros]=useState(emptyFiltros)
+  const [filtros,setFiltros]=useState(()=>safeJSON('leo_filtros_lancamentos', emptyFiltros))
   const emptyCompFiltros = {status:'Todos', conta:'Todas', forma:'Todas', natureza:'Todas', categoria:'Todas', busca:'', ordenacao:'recentes'}
-  const [compFiltros,setCompFiltros]=useState(emptyCompFiltros)
+  const [compFiltros,setCompFiltros]=useState(()=>safeJSON('leo_filtros_compromissos', emptyCompFiltros))
   const [compSelecionados,setCompSelecionados]=useState([])
   const [categoriaAberta,setCategoriaAberta]=useState(null)
   const [naturezaAberta,setNaturezaAberta]=useState(null)
+  const [dashboardDetalhe,setDashboardDetalhe]=useState(null)
+  const [buscaGlobal,setBuscaGlobal]=useState('')
+  const [resultadoAberto,setResultadoAberto]=useState(false)
 
   useEffect(()=>{
     supabase.auth.getSession().then(({data})=>{setSession(data.session);setLoading(false)})
@@ -121,6 +127,8 @@ function App(){
   useEffect(()=>{
     Object.entries(planejamento).forEach(([key,value])=>localStorage.setItem(`planejamento_${key}`, String(value ?? '')))
   },[planejamento])
+  useEffect(()=>localStorage.setItem('leo_filtros_lancamentos', JSON.stringify(filtros)), [filtros])
+  useEffect(()=>localStorage.setItem('leo_filtros_compromissos', JSON.stringify(compFiltros)), [compFiltros])
 
   async function carregar(){
     const [{data:t,error:et},{data:c,error:ec}] = await Promise.all([
@@ -529,6 +537,54 @@ function App(){
   }
 
 
+
+  const receitasRecebidasDetalhe = useMemo(()=>transacoes.filter(t=>t.tipo==='Receita Recebida').sort((a,b)=>b.data.localeCompare(a.data)),[transacoes])
+  const receitasPrevistasDetalhe = useMemo(()=>transacoes.filter(t=>t.tipo==='Receita Prevista').sort((a,b)=>b.data.localeCompare(a.data)),[transacoes])
+  const creditoDetalhe = useMemo(()=>transacoes.filter(t=>t.tipo==='Despesa' && t.forma==='Crédito').sort((a,b)=>Number(b.valor)-Number(a.valor)),[transacoes])
+  const caixaDetalhe = useMemo(()=>transacoes.filter(t=>t.forma==='Débito/PIX' || t.tipo==='Receita Recebida').sort((a,b)=>b.data.localeCompare(a.data)),[transacoes])
+  const investimentoDetalhe = useMemo(()=>transacoes.filter(t=>t.tipo==='Investimento').sort((a,b)=>b.data.localeCompare(a.data)),[transacoes])
+  const compromissosPrevistosDetalhe = useMemo(()=>compromissos.filter(c=>c.status==='Previsto').sort((a,b)=>Number(b.valor_previsto)-Number(a.valor_previsto)),[compromissos])
+
+  const resultadosGlobais = useMemo(()=>{
+    const q = buscaGlobal.trim().toLowerCase()
+    if(q.length < 2) return []
+    const lancamentos = transacoes
+      .filter(t=>[t.descricao,t.tipo,t.categoria,t.conta,t.forma,t.natureza].join(' ').toLowerCase().includes(q))
+      .map(t=>({kind:'Lançamento', title:t.descricao, meta:`${formatBR(t.data)} • ${t.tipo} • ${t.conta}`, valor:Number(t.valor), id:`t-${t.id}`}))
+    const comps = compromissos
+      .filter(c=>[c.descricao,c.status,c.categoria,c.conta,c.forma,c.natureza].join(' ').toLowerCase().includes(q))
+      .map(c=>({kind:'Compromisso', title:c.descricao, meta:`${formatBR(c.ciclo_inicio)} a ${formatBR(c.ciclo_fim)} • ${c.status} • ${c.conta}`, valor:Number(c.valor_previsto), id:`c-${c.id}`}))
+    return [...lancamentos, ...comps].sort((a,b)=>Math.abs(b.valor)-Math.abs(a.valor)).slice(0,20)
+  },[buscaGlobal,transacoes,compromissos])
+
+  function exportarBackupJSON(){
+    const payload = {
+      app:'Leo Finance',
+      version:'1.2.4',
+      exported_at:new Date().toISOString(),
+      ciclo:{inicio:inicioCiclo,fim:fimCiclo},
+      meta_aporte:metaAporte,
+      planejamento,
+      transacoes,
+      compromissos
+    }
+    const blob = new Blob([JSON.stringify(payload,null,2)], {type:'application/json;charset=utf-8;'})
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `leo-finance-backup-${isoToday()}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function renderListaDetalhe(lista, tipo='transacao'){
+    return <div className="detail-list compact">
+      {lista.slice(0,12).map(item=><div key={item.id}><span>{tipo==='compromisso' ? `${item.descricao} • ${item.categoria} • ${item.conta}` : `${formatBR(item.data)} • ${item.descricao} • ${item.conta}`}</span><b>{money(tipo==='compromisso'?item.valor_previsto:item.valor)}</b></div>)}
+      {lista.length===0 && <p className="chart-note">Nenhum item encontrado neste ciclo.</p>}
+      {lista.length>12 && <p className="chart-note">Mostrando os 12 maiores/mais recentes itens.</p>}
+    </div>
+  }
+
   function exportarCSV(){
     const linhas=[['Data','Tipo','Categoria','Conta','Forma','Natureza','Descrição','Valor']]
     transacoes.forEach(t=>linhas.push([t.data,t.tipo,t.categoria,t.conta,t.forma,t.natureza,t.descricao,t.valor]))
@@ -548,7 +604,7 @@ function App(){
         <button className="ghost" onClick={cicloAnterior}>← Ciclo anterior</button><button className="ghost" onClick={aplicarCicloAtual}>Ciclo atual</button><button className="ghost" onClick={proximoCiclo}>Próximo ciclo →</button>
         <label>Início</label><input type="date" value={inicioCiclo} onChange={e=>setInicioCiclo(e.target.value)}/>
         <label>Fim</label><input type="date" value={fimCiclo} onChange={e=>setFimCiclo(e.target.value)}/>
-        <button className="ghost" onClick={exportarCSV}><Download size={16}/> Exportar CSV</button>
+        <button className="ghost" onClick={exportarCSV}><Download size={16}/> Exportar CSV</button><button className="ghost" onClick={exportarBackupJSON}><FileDown size={16}/> Backup JSON</button>
       </section>
 
       <nav className="tabs">
@@ -556,21 +612,39 @@ function App(){
         <button className={tab==='lancamentos'?'active':''} onClick={()=>setTab('lancamentos')}><ClipboardList size={16}/> Lançamentos</button>
         <button className={tab==='planejamento'?'active':''} onClick={()=>setTab('planejamento')}><Calculator size={16}/> Planejamento</button>
         <button className={tab==='analises'?'active':''} onClick={()=>setTab('analises')}><BarChart3 size={16}/> Análises</button>
+        <button className={tab==='configuracoes'?'active':''} onClick={()=>setTab('configuracoes')}><Settings size={16}/> Configurações</button>
       </nav>
+
+      <section className="global-search">
+        <Search size={18}/>
+        <input value={buscaGlobal} onChange={e=>{setBuscaGlobal(e.target.value); setResultadoAberto(true)}} onFocus={()=>setResultadoAberto(true)} placeholder="Pesquisar lançamentos e compromissos..." />
+        {buscaGlobal && <button className="ghost" type="button" onClick={()=>{setBuscaGlobal(''); setResultadoAberto(false)}}>Limpar</button>}
+        {resultadoAberto && resultadosGlobais.length>0 && <div className="search-results">
+          {resultadosGlobais.map(r=><div key={r.id}><span><b>{r.kind}</b> • {r.title}<small>{r.meta}</small></span><strong>{money(r.valor)}</strong></div>)}
+        </div>}
+      </section>
 
       {tab==='dashboard' && <>
         <section className="cards">
-          <div className="card hero-card"><span>Caixa disponível</span><strong className={dash.caixaDisponivel>=0?'green':'red'}>{money(dash.caixaDisponivel)}</strong><small>Meta diária: {money(dash.mediaPermitidaDia)}</small></div>
-          <div className="card"><span>Receita recebida</span><strong className="green">{money(dash.receitaRecebida)}</strong></div>
-          <div className="card"><span>Receita prevista</span><strong className="green">{money(dash.receitaPrevista)}</strong></div>
-          <div className="card"><span>Crédito utilizado</span><strong>{money(dash.credito)}</strong></div>
+          <div className={`card hero-card clickable-card ${dashboardDetalhe==='caixa'?'selected':''}`} onClick={()=>setDashboardDetalhe(dashboardDetalhe==='caixa'?null:'caixa')}><span>Caixa disponível</span><strong className={dash.caixaDisponivel>=0?'green':'red'}>{money(dash.caixaDisponivel)}</strong><small>Meta diária: {money(dash.mediaPermitidaDia)}</small></div>
+          <div className={`card clickable-card ${dashboardDetalhe==='receitaRecebida'?'selected':''}`} onClick={()=>setDashboardDetalhe(dashboardDetalhe==='receitaRecebida'?null:'receitaRecebida')}><span>Receita recebida</span><strong className="green">{money(dash.receitaRecebida)}</strong><small>Clique para ver detalhes</small></div>
+          <div className={`card clickable-card ${dashboardDetalhe==='receitaPrevista'?'selected':''}`} onClick={()=>setDashboardDetalhe(dashboardDetalhe==='receitaPrevista'?null:'receitaPrevista')}><span>Receita prevista</span><strong className="green">{money(dash.receitaPrevista)}</strong><small>Clique para ver detalhes</small></div>
+          <div className={`card clickable-card ${dashboardDetalhe==='credito'?'selected':''}`} onClick={()=>setDashboardDetalhe(dashboardDetalhe==='credito'?null:'credito')}><span>Crédito utilizado</span><strong>{money(dash.credito)}</strong><small>Próxima fatura do ciclo</small></div>
         </section>
         <section className="cards">
-          <div className="card"><span>Compromissos previstos</span><strong>{money(dash.compromissosPrevistos)}</strong></div>
-          <div className="card"><span>Dias restantes</span><strong>{dash.diasRestantes}</strong></div>
+          <div className={`card clickable-card ${dashboardDetalhe==='compromissos'?'selected':''}`} onClick={()=>setDashboardDetalhe(dashboardDetalhe==='compromissos'?null:'compromissos')}><span>Compromissos previstos</span><strong>{money(dash.compromissosPrevistos)}</strong><small>Clique para ver detalhes</small></div>
+          <div className="card"><span>Dias restantes</span><strong>{dash.diasRestantes}</strong><small>Até {formatBR(fimCiclo)}</small></div>
           <div className="card"><span>Situação do ciclo</span><strong className={dash.situacao==='Crítico'?'red':dash.situacao==='Atenção'?'':'green'}>{dash.situacao}</strong><small>{dash.situacaoDescricao}</small></div>
-          <div className="card"><span>Investido no ciclo</span><strong>{money(dash.investimentos)}</strong><small>Reserva aporte: {money(dash.reservaAporte)}</small></div>
+          <div className={`card clickable-card ${dashboardDetalhe==='investimentos'?'selected':''}`} onClick={()=>setDashboardDetalhe(dashboardDetalhe==='investimentos'?null:'investimentos')}><span>Investido no ciclo</span><strong>{money(dash.investimentos)}</strong><small>Reserva aporte: {money(dash.reservaAporte)}</small></div>
         </section>
+        {dashboardDetalhe && <section className="panel dashboard-detail"><h2><ChevronDown size={18}/> Detalhes do card</h2>
+          {dashboardDetalhe==='caixa' && <><p className="chart-note">Movimentos em Débito/PIX e receitas recebidas que explicam o caixa disponível do ciclo.</p>{renderListaDetalhe(caixaDetalhe)}</>}
+          {dashboardDetalhe==='receitaRecebida' && renderListaDetalhe(receitasRecebidasDetalhe)}
+          {dashboardDetalhe==='receitaPrevista' && renderListaDetalhe(receitasPrevistasDetalhe)}
+          {dashboardDetalhe==='credito' && renderListaDetalhe(creditoDetalhe)}
+          {dashboardDetalhe==='compromissos' && renderListaDetalhe(compromissosPrevistosDetalhe,'compromisso')}
+          {dashboardDetalhe==='investimentos' && renderListaDetalhe(investimentoDetalhe)}
+        </section>}
         <section className="projection"><div><h2><TrendingUp size={19}/> Projeção do ciclo</h2><p>Média variável real: <b>{money(dash.mediaVariavelDia)}/dia</b>. Meta diária atual: <b>{money(dash.mediaPermitidaDia)}/dia</b>. Faltam <b>{dash.diasRestantes}</b> dias.</p><p className="chart-note">{dash.saldoProjetadoDescricao}</p></div><div className={dash.saldoProjetado>=0?'projection-number green':'projection-number red'}><span>Saldo projetado</span><strong>{money(dash.saldoProjetado)}</strong></div></section>
         <section className="panel"><h2>Recomendações do ciclo</h2><div className="recommendations">{dash.recomendacoes.map((r,i)=><div key={i}>{r}</div>)}</div></section>
         <section className="layout">
@@ -693,6 +767,40 @@ function App(){
           <div className="panel"><h2>Resumo fixos x variáveis</h2><div className="simple-list">{fixosVariaveis.map((n,i)=><div key={n.natureza}><span><b className="dot" style={{background:COLORS[i+4]}}></b>{n.natureza}</span><b>{money(n.valor)} • {pct(n.valor,dash.receitaTotal)}</b><button className="mini-button" onClick={()=>setNaturezaAberta(naturezaAberta===n.natureza?null:n.natureza)}>{naturezaAberta===n.natureza?'Fechar':'Ver gastos'}</button></div>)}</div>{naturezaAberta&&<div className="detail-list"><h3>{naturezaAberta} — do maior para o menor</h3>{detalhesNaturezaSelecionada.map(t=><div key={t.id}><span>{formatBR(t.data)} • {t.categoria} • {t.descricao}</span><b>{money(t.valor)}</b></div>)}{detalhesNaturezaSelecionada.length===0&&<p className="chart-note">Nenhum gasto encontrado.</p>}</div>}</div>
         </section>
       </>}
+
+      {tab==='configuracoes' && <>
+        <section className="layout">
+          <div className="panel form"><h2><Settings size={18}/> Preferências do ciclo</h2><div className="form-grid">
+            <label className="field-label">Meta mínima de aporte
+              <input type="number" step="0.01" value={metaAporte} onChange={e=>setMetaAporte(Number(e.target.value||0))}/>
+            </label>
+            <label className="field-label">Aporte mínimo do planejamento
+              <input type="number" step="0.01" value={planejamento.aporteMinimo} onChange={e=>setPlanejamento({...planejamento,aporteMinimo:e.target.value})}/>
+            </label>
+            <label className="field-label">Caixa desejado padrão
+              <input type="number" step="0.01" value={planejamento.caixaDesejado} onChange={e=>setPlanejamento({...planejamento,caixaDesejado:e.target.value})}/>
+            </label>
+            <label className="field-label">Fatura estimada manual
+              <input type="number" step="0.01" value={planejamento.fatura} onChange={e=>setPlanejamento({...planejamento,fatura:e.target.value})}/>
+            </label>
+          </div><p className="chart-note">Essas preferências ficam salvas no navegador e não alteram seus lançamentos históricos.</p></div>
+          <div className="panel"><h2><FileDown size={18}/> Backup e exportação</h2><div className="simple-list">
+            <div><span>Backup completo JSON</span><button className="mini-button" onClick={exportarBackupJSON}>Baixar backup</button></div>
+            <div><span>Planilha CSV do ciclo atual</span><button className="mini-button" onClick={exportarCSV}>Baixar CSV</button></div>
+          </div><p className="chart-note">O backup JSON inclui transações, compromissos e preferências do planejamento. Guarde uma cópia antes de grandes atualizações.</p></div>
+        </section>
+        <section className="layout">
+          <div className="panel"><h2>Cores das instituições</h2><div className="simple-list">
+            {CONTAS.map(conta=><div key={conta}><span><b className="dot" style={{background:getContaColor(conta)}}></b>{conta}</span><b>{conta==='XP'?'Preto/cinza':conta==='Nubank'?'Roxo':'Laranja'}</b></div>)}
+          </div></div>
+          <div className="panel"><h2>Uso seguro</h2><div className="simple-list">
+            <div><span>Autenticação</span><b>Supabase Auth</b></div>
+            <div><span>Dados por usuário</span><b>RLS ativo no banco</b></div>
+            <div><span>Chave pública</span><b>Anon key permitida no front-end</b></div>
+          </div><p className="chart-note">Nunca publique a service_role key. Para mais detalhes, consulte SECURITY.md no repositório.</p></div>
+        </section>
+      </>}
+
     </main>
   </div>
 }
