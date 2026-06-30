@@ -102,8 +102,13 @@ function App(){
     bonus: localStorage.getItem('planejamento_bonus') || '',
     extras: localStorage.getItem('planejamento_extras') || '',
     fatura: localStorage.getItem('planejamento_fatura') || '',
-    aporteMinimo: localStorage.getItem('planejamento_aporteMinimo') || localStorage.getItem('metaAporteLeo') || '600',
-    caixaDesejado: localStorage.getItem('planejamento_caixaDesejado') || ''
+    aporteMinimo: localStorage.getItem('planejamento_aporteMinimo') || localStorage.getItem('config_aporteMinimo') || localStorage.getItem('metaAporteLeo') || '600',
+    caixaDesejado: localStorage.getItem('planejamento_caixaDesejado') || localStorage.getItem('config_caixaDesejado') || ''
+  })
+  const [configPadrao,setConfigPadrao]=useState({
+    aporteMinimo: localStorage.getItem('config_aporteMinimo') || localStorage.getItem('metaAporteLeo') || '600',
+    caixaDesejado: localStorage.getItem('config_caixaDesejado') || '',
+    fatura: localStorage.getItem('config_fatura') || ''
   })
 
   const emptyFiltros = {dataInicio:'', dataFim:'', tipo:'Todos', conta:'Todas', forma:'Todas', natureza:'Todas', categoria:'Todas', busca:'', ordenacao:'recentes'}
@@ -127,6 +132,9 @@ function App(){
   useEffect(()=>{
     Object.entries(planejamento).forEach(([key,value])=>localStorage.setItem(`planejamento_${key}`, String(value ?? '')))
   },[planejamento])
+  useEffect(()=>{
+    Object.entries(configPadrao).forEach(([key,value])=>localStorage.setItem(`config_${key}`, String(value ?? '')))
+  },[configPadrao])
   useEffect(()=>localStorage.setItem('leo_filtros_lancamentos', JSON.stringify(filtros)), [filtros])
   useEffect(()=>localStorage.setItem('leo_filtros_compromissos', JSON.stringify(compFiltros)), [compFiltros])
 
@@ -560,11 +568,12 @@ function App(){
   function exportarBackupJSON(){
     const payload = {
       app:'Leo Finance',
-      version:'1.2.4',
+      version:'1.2.5',
       exported_at:new Date().toISOString(),
       ciclo:{inicio:inicioCiclo,fim:fimCiclo},
       meta_aporte:metaAporte,
       planejamento,
+      config_padrao: configPadrao,
       transacoes,
       compromissos
     }
@@ -597,8 +606,23 @@ function App(){
   if(loading) return <div className="loading">Carregando...</div>
   if(!session) return <AuthScreen/>
 
+  const navItems = [
+    {id:'dashboard', label:'Dashboard', icon:<LayoutDashboard size={22}/>},
+    {id:'lancamentos', label:'Lançamentos', icon:<ClipboardList size={22}/>},
+    {id:'planejamento', label:'Planejamento', icon:<Calculator size={22}/>},
+    {id:'analises', label:'Análises', icon:<BarChart3 size={22}/>},
+    {id:'configuracoes', label:'Configurações', icon:<Settings size={22}/>}
+  ]
+
   return <div className="app">
-    <header className="topbar"><div><h1>Leo Finance</h1><p>Ciclo: {formatBR(inicioCiclo)} até {formatBR(fimCiclo)} • {session.user.email}</p></div><button className="ghost" onClick={()=>supabase.auth.signOut()}><LogOut size={16}/> Sair</button></header>
+    <aside className="sidebar">
+      <div className="sidebar-logo" title="Leo Finance"><WalletCards size={24}/></div>
+      <nav className="sidebar-nav">
+        {navItems.map(item=><button key={item.id} className={tab===item.id?'active':''} onClick={()=>setTab(item.id)} title={item.label} aria-label={item.label}>{item.icon}<span className="sidebar-tooltip">{item.label}</span></button>)}
+      </nav>
+      <button className="sidebar-logout" onClick={()=>supabase.auth.signOut()} title="Sair" aria-label="Sair"><LogOut size={21}/><span className="sidebar-tooltip">Sair</span></button>
+    </aside>
+    <header className="topbar"><div><h1>Leo Finance</h1><p>Ciclo: {formatBR(inicioCiclo)} até {formatBR(fimCiclo)} • {session.user.email}</p></div></header>
     <main>
       <section className="toolbar">
         <button className="ghost" onClick={cicloAnterior}>← Ciclo anterior</button><button className="ghost" onClick={aplicarCicloAtual}>Ciclo atual</button><button className="ghost" onClick={proximoCiclo}>Próximo ciclo →</button>
@@ -606,14 +630,6 @@ function App(){
         <label>Fim</label><input type="date" value={fimCiclo} onChange={e=>setFimCiclo(e.target.value)}/>
         <button className="ghost" onClick={exportarCSV}><Download size={16}/> Exportar CSV</button><button className="ghost" onClick={exportarBackupJSON}><FileDown size={16}/> Backup JSON</button>
       </section>
-
-      <nav className="tabs">
-        <button className={tab==='dashboard'?'active':''} onClick={()=>setTab('dashboard')}><LayoutDashboard size={16}/> Dashboard</button>
-        <button className={tab==='lancamentos'?'active':''} onClick={()=>setTab('lancamentos')}><ClipboardList size={16}/> Lançamentos</button>
-        <button className={tab==='planejamento'?'active':''} onClick={()=>setTab('planejamento')}><Calculator size={16}/> Planejamento</button>
-        <button className={tab==='analises'?'active':''} onClick={()=>setTab('analises')}><BarChart3 size={16}/> Análises</button>
-        <button className={tab==='configuracoes'?'active':''} onClick={()=>setTab('configuracoes')}><Settings size={16}/> Configurações</button>
-      </nav>
 
       <section className="global-search">
         <Search size={18}/>
@@ -770,34 +786,30 @@ function App(){
 
       {tab==='configuracoes' && <>
         <section className="layout">
-          <div className="panel form"><h2><Settings size={18}/> Preferências do ciclo</h2><div className="form-grid">
-            <label className="field-label">Meta mínima de aporte
-              <input type="number" step="0.01" value={metaAporte} onChange={e=>setMetaAporte(Number(e.target.value||0))}/>
-            </label>
-            <label className="field-label">Aporte mínimo do planejamento
-              <input type="number" step="0.01" value={planejamento.aporteMinimo} onChange={e=>setPlanejamento({...planejamento,aporteMinimo:e.target.value})}/>
+          <div className="panel form"><h2><Settings size={18}/> Padrões para próximos ciclos</h2><div className="form-grid">
+            <label className="field-label">Meta mínima de aporte padrão
+              <input type="number" step="0.01" value={configPadrao.aporteMinimo} onChange={e=>setConfigPadrao({...configPadrao,aporteMinimo:e.target.value})}/>
             </label>
             <label className="field-label">Caixa desejado padrão
-              <input type="number" step="0.01" value={planejamento.caixaDesejado} onChange={e=>setPlanejamento({...planejamento,caixaDesejado:e.target.value})}/>
+              <input type="number" step="0.01" value={configPadrao.caixaDesejado} onChange={e=>setConfigPadrao({...configPadrao,caixaDesejado:e.target.value})}/>
             </label>
-            <label className="field-label">Fatura estimada manual
-              <input type="number" step="0.01" value={planejamento.fatura} onChange={e=>setPlanejamento({...planejamento,fatura:e.target.value})}/>
+            <label className="field-label">Fatura estimada padrão
+              <input type="number" step="0.01" value={configPadrao.fatura} onChange={e=>setConfigPadrao({...configPadrao,fatura:e.target.value})}/>
             </label>
-          </div><p className="chart-note">Essas preferências ficam salvas no navegador e não alteram seus lançamentos históricos.</p></div>
+          </div><p className="chart-note">Esses valores são padrões para referência futura. Alterar aqui não muda o Planejamento do ciclo atual.</p>
+          <button type="button" className="ghost full" onClick={()=>setPlanejamento({...planejamento,aporteMinimo:configPadrao.aporteMinimo,caixaDesejado:configPadrao.caixaDesejado,fatura:configPadrao.fatura})}>Aplicar padrões ao Planejamento atual</button></div>
           <div className="panel"><h2><FileDown size={18}/> Backup e exportação</h2><div className="simple-list">
             <div><span>Backup completo JSON</span><button className="mini-button" onClick={exportarBackupJSON}>Baixar backup</button></div>
             <div><span>Planilha CSV do ciclo atual</span><button className="mini-button" onClick={exportarCSV}>Baixar CSV</button></div>
           </div><p className="chart-note">O backup JSON inclui transações, compromissos e preferências do planejamento. Guarde uma cópia antes de grandes atualizações.</p></div>
         </section>
         <section className="layout">
-          <div className="panel"><h2>Cores das instituições</h2><div className="simple-list">
-            {CONTAS.map(conta=><div key={conta}><span><b className="dot" style={{background:getContaColor(conta)}}></b>{conta}</span><b>{conta==='XP'?'Preto/cinza':conta==='Nubank'?'Roxo':'Laranja'}</b></div>)}
-          </div></div>
           <div className="panel"><h2>Uso seguro</h2><div className="simple-list">
             <div><span>Autenticação</span><b>Supabase Auth</b></div>
             <div><span>Dados por usuário</span><b>RLS ativo no banco</b></div>
             <div><span>Chave pública</span><b>Anon key permitida no front-end</b></div>
           </div><p className="chart-note">Nunca publique a service_role key. Para mais detalhes, consulte SECURITY.md no repositório.</p></div>
+          <div className="panel"><h2>Instituições</h2><p className="chart-note">As cores dos bancos ficam padronizadas internamente: XP em preto/cinza, Nubank em roxo e Inter em laranja. Isso evita inconsistências nos gráficos.</p></div>
         </section>
       </>}
 

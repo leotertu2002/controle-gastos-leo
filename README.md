@@ -1,12 +1,11 @@
-# Leo Finance v1.2.4
+# Leo Finance v1.2.5
 
-Atualização de polimento e experiência.
+Atualização focada em navegação e configurações.
 
 Inclui:
-- Dashboard com cards clicáveis/expansíveis.
-- Pesquisa global por lançamentos e compromissos.
-- Aba Configurações.
-- Backup completo em JSON.
-- Filtros persistentes no navegador.
-- Melhorias visuais e microinterações.
-- Mantém a estrutura de dados existente, sem SQL novo.
+- Menu lateral fixo com ícones e tooltip ao passar o mouse.
+- Configurações separadas do Planejamento atual.
+- Configurações agora representam padrões para próximos ciclos.
+- Botão para aplicar padrões ao Planejamento atual quando desejado.
+- Remoção das cores dos bancos da tela de Configurações.
+- Mantém dados existentes e não exige SQL novo.
