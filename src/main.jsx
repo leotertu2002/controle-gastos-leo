@@ -15,6 +15,8 @@ const TIPOS = ['Despesa','Receita Prevista','Receita Recebida','Investimento','P
 const PARCELAMENTOS = ['À vista','Parcelado','Recorrente/sem previsão']
 const COMP_PLANOS = ['Único','Parcelado','Recorrente']
 const COLORS = ['#60a5fa','#34d399','#fbbf24','#f87171','#a78bfa','#fb7185','#22d3ee','#f97316','#94a3b8','#4ade80']
+const BANK_COLORS = { Nubank: '#8A05BE', Inter: '#ff7a00', XP: '#111827' }
+const getContaColor = (conta) => BANK_COLORS[conta] || '#60a5fa'
 const RECORRENCIA_CICLOS = 12
 
 function money(v){return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}
@@ -103,6 +105,11 @@ function App(){
 
   const emptyFiltros = {dataInicio:'', dataFim:'', tipo:'Todos', conta:'Todas', forma:'Todas', natureza:'Todas', categoria:'Todas', busca:'', ordenacao:'recentes'}
   const [filtros,setFiltros]=useState(emptyFiltros)
+  const emptyCompFiltros = {status:'Todos', conta:'Todas', forma:'Todas', natureza:'Todas', categoria:'Todas', busca:'', ordenacao:'recentes'}
+  const [compFiltros,setCompFiltros]=useState(emptyCompFiltros)
+  const [compSelecionados,setCompSelecionados]=useState([])
+  const [categoriaAberta,setCategoriaAberta]=useState(null)
+  const [naturezaAberta,setNaturezaAberta]=useState(null)
 
   useEffect(()=>{
     supabase.auth.getSession().then(({data})=>{setSession(data.session);setLoading(false)})
@@ -354,24 +361,18 @@ function App(){
     return {mediaPermitidaDia,receitaPrevista,receitaRecebida,receitaTotal,despesas,investimentos,pagamentosFatura,gastosVariaveis,credito,caixaDisponivel,compromissosPrevistos,reservaAporte,diasRestantes,mediaVariavelDia,projecaoVariavelRestante,saldoProjetado,situacao,situacaoDescricao,saldoProjetadoDescricao,recomendacoes}
   },[transacoes,compromissos,metaAporte,inicioCiclo,fimCiclo,saldoPorConta])
 
-  const gastosReais = transacoes.filter(t=>['Despesa','Investimento'].includes(t.tipo))
-  const porCategoriaBase=useMemo(()=>{
+  const gastosReais = transacoes.filter(t=>t.tipo==='Despesa')
+  const porCategoria=useMemo(()=>{
     const map={}
     gastosReais.forEach(t=>map[t.categoria]=(map[t.categoria]||0)+Number(t.valor))
-    return Object.entries(map).map(([categoria,valor])=>({categoria,valor}))
+    return Object.entries(map).map(([categoria,valor])=>({categoria,valor})).sort((a,b)=>b.valor-a.valor)
   },[transacoes])
-  const porCategoria=useMemo(()=>{
-    const arr=[...porCategoriaBase].sort((a,b)=>b.valor-a.valor)
-    const restante = Math.max(0, dash.receitaTotal - arr.reduce((s,x)=>s+x.valor,0) - dash.compromissosPrevistos - dash.reservaAporte)
-    if(restante > 0) arr.push({categoria:'Disponível / não gasto', valor:restante})
-    return arr
-  },[porCategoriaBase,dash.receitaTotal,dash.compromissosPrevistos,dash.reservaAporte])
   const porConta=useMemo(()=>{
     return CONTAS.map(conta=>({conta, valor:gastosReais.filter(t=>t.conta===conta).reduce((s,t)=>s+Number(t.valor),0)}))
   },[transacoes])
   const fixosVariaveis=useMemo(()=>{
-    const fixos = transacoes.filter(t=>['Despesa','Investimento'].includes(t.tipo) && t.natureza==='Gastos Fixos').reduce((s,t)=>s+Number(t.valor),0)
-    const variaveis = transacoes.filter(t=>['Despesa','Investimento'].includes(t.tipo) && t.natureza==='Gastos Variáveis').reduce((s,t)=>s+Number(t.valor),0)
+    const fixos = transacoes.filter(t=>t.tipo==='Despesa' && t.natureza==='Gastos Fixos').reduce((s,t)=>s+Number(t.valor),0)
+    const variaveis = transacoes.filter(t=>t.tipo==='Despesa' && t.natureza==='Gastos Variáveis').reduce((s,t)=>s+Number(t.valor),0)
     return [{natureza:'Gastos Fixos', valor:fixos},{natureza:'Gastos Variáveis', valor:variaveis}]
   },[transacoes])
   const porDiaVariavel=useMemo(()=>{
@@ -380,7 +381,7 @@ function App(){
     return Object.entries(map).map(([data,valor])=>({data, dia:data.slice(8,10)+'/'+data.slice(5,7), valor})).sort((a,b)=>a.data.localeCompare(b.data))
   },[transacoes])
   const faturas=useMemo(()=>{
-    return CONTAS.map(conta=>({conta, valor:transacoes.filter(t=>t.conta===conta&&t.forma==='Crédito'&&['Despesa','Investimento'].includes(t.tipo)).reduce((s,t)=>s+Number(t.valor),0)}))
+    return CONTAS.map(conta=>({conta, valor:transacoes.filter(t=>t.conta===conta&&t.forma==='Crédito'&&t.tipo==='Despesa').reduce((s,t)=>s+Number(t.valor),0)}))
   },[transacoes])
 
   const planejamentoCalc=useMemo(()=>{
@@ -475,7 +476,58 @@ function App(){
     return cells
   },[transacoes,inicioCiclo,fimCiclo])
 
+  const detalhesCategoriaSelecionada=useMemo(()=>{
+    if(!categoriaAberta) return []
+    return transacoes
+      .filter(t=>t.tipo==='Despesa' && t.categoria===categoriaAberta)
+      .sort((a,b)=>Number(b.valor)-Number(a.valor))
+  },[transacoes,categoriaAberta])
+
+  const detalhesNaturezaSelecionada=useMemo(()=>{
+    if(!naturezaAberta) return []
+    return transacoes
+      .filter(t=>t.tipo==='Despesa' && t.natureza===naturezaAberta)
+      .sort((a,b)=>Number(b.valor)-Number(a.valor))
+  },[transacoes,naturezaAberta])
+
+  const compromissosFiltrados=useMemo(()=>{
+    let arr=[...compromissos]
+    if(compFiltros.status!=='Todos') arr=arr.filter(c=>c.status===compFiltros.status)
+    if(compFiltros.conta!=='Todas') arr=arr.filter(c=>c.conta===compFiltros.conta)
+    if(compFiltros.forma!=='Todas') arr=arr.filter(c=>c.forma===compFiltros.forma)
+    if(compFiltros.natureza!=='Todas') arr=arr.filter(c=>c.natureza===compFiltros.natureza)
+    if(compFiltros.categoria!=='Todas') arr=arr.filter(c=>c.categoria===compFiltros.categoria)
+    if(compFiltros.busca.trim()){
+      const q=compFiltros.busca.trim().toLowerCase()
+      arr=arr.filter(c=>String(c.descricao||'').toLowerCase().includes(q))
+    }
+    arr.sort((a,b)=>{
+      if(compFiltros.ordenacao==='maior') return Number(b.valor_previsto)-Number(a.valor_previsto)
+      if(compFiltros.ordenacao==='menor') return Number(a.valor_previsto)-Number(b.valor_previsto)
+      if(compFiltros.ordenacao==='descricao') return String(a.descricao||'').localeCompare(String(b.descricao||''))
+      return String(a.descricao||'').localeCompare(String(b.descricao||''))
+    })
+    return arr
+  },[compromissos,compFiltros])
+
   function limparFiltros(){ setFiltros(emptyFiltros) }
+  function limparCompFiltros(){ setCompFiltros(emptyCompFiltros); setCompSelecionados([]) }
+  function toggleCompSelecionado(id){
+    setCompSelecionados(prev=>prev.includes(id) ? prev.filter(x=>x!==id) : [...prev,id])
+  }
+  function toggleTodosCompromissos(){
+    const ids=compromissosFiltrados.map(c=>c.id)
+    const todosSelecionados=ids.length>0 && ids.every(id=>compSelecionados.includes(id))
+    setCompSelecionados(todosSelecionados ? compSelecionados.filter(id=>!ids.includes(id)) : Array.from(new Set([...compSelecionados,...ids])))
+  }
+  async function excluirCompromissosSelecionados(){
+    if(compSelecionados.length===0) return alert('Selecione pelo menos um compromisso.')
+    if(!confirm(`Excluir ${compSelecionados.length} compromisso(s) selecionado(s)?`)) return
+    const {error}=await supabase.from('compromissos').delete().in('id',compSelecionados)
+    if(error) alert(error.message)
+    else { setCompSelecionados([]); carregar() }
+  }
+
 
   function exportarCSV(){
     const linhas=[['Data','Tipo','Categoria','Conta','Forma','Natureza','Descrição','Valor']]
@@ -522,8 +574,8 @@ function App(){
         <section className="projection"><div><h2><TrendingUp size={19}/> Projeção do ciclo</h2><p>Média variável real: <b>{money(dash.mediaVariavelDia)}/dia</b>. Meta diária atual: <b>{money(dash.mediaPermitidaDia)}/dia</b>. Faltam <b>{dash.diasRestantes}</b> dias.</p><p className="chart-note">{dash.saldoProjetadoDescricao}</p></div><div className={dash.saldoProjetado>=0?'projection-number green':'projection-number red'}><span>Saldo projetado</span><strong>{money(dash.saldoProjetado)}</strong></div></section>
         <section className="panel"><h2>Recomendações do ciclo</h2><div className="recommendations">{dash.recomendacoes.map((r,i)=><div key={i}>{r}</div>)}</div></section>
         <section className="layout">
-          <div className="panel"><h2>Faturas por cartão</h2><div className="simple-list">{faturas.map((f,i)=><div key={f.conta}><span><b className="dot" style={{background:COLORS[i]}}></b>{f.conta}</span><b>{money(f.valor)}</b></div>)}</div></div>
-          <div className="panel"><h2>Saldo por conta</h2><div className="simple-list">{saldoPorConta.map((s,i)=><div key={s.conta}><span><b className="dot" style={{background:COLORS[i+3]}}></b>{s.conta}</span><b className={s.valor>=0?'green':'red'}>{money(s.valor)}</b></div>)}</div><p className="chart-note">Considera apenas Receita Recebida e saídas em Débito/PIX.</p></div>
+          <div className="panel"><h2>Faturas por cartão</h2><div className="simple-list">{faturas.map((f,i)=><div key={f.conta}><span><b className="dot" style={{background:getContaColor(f.conta)}}></b>{f.conta}</span><b>{money(f.valor)}</b></div>)}</div></div>
+          <div className="panel"><h2>Saldo por conta</h2><div className="simple-list">{saldoPorConta.map((s,i)=><div key={s.conta}><span><b className="dot" style={{background:getContaColor(s.conta)}}></b>{s.conta}</span><b className={s.valor>=0?'green':'red'}>{money(s.valor)}</b></div>)}</div><p className="chart-note">Considera apenas Receita Recebida e saídas em Débito/PIX.</p></div>
         </section>
       </>}
 
@@ -553,9 +605,21 @@ function App(){
             {!editingCompromisso && compForm.plano === 'Parcelado' && <input placeholder="Quantidade de parcelas" type="number" min="2" step="1" value={compForm.quantidade_parcelas} onChange={e=>setCompForm({...compForm,quantidade_parcelas:e.target.value})} required/>}
           </div><button>{editingCompromisso?'Salvar edição':'Adicionar compromisso'}</button>{editingCompromisso&&<button type="button" className="ghost full" onClick={()=>{setEditingCompromisso(null);setCompForm(emptyCompForm)}}>Cancelar edição</button>}</form>
         </section>
-        <section className="panel"><h2>Compromissos previstos</h2><div className="table-wrap"><table><thead><tr><th>Status</th><th>Descrição</th><th>Categoria</th><th>Conta</th><th>Forma</th><th>Natureza</th><th>Valor</th><th>Ações</th></tr></thead><tbody>
-          {compromissos.map(c=><tr key={c.id} className={c.status!=='Previsto'?'muted-row':''}><td>{c.status}</td><td>{c.descricao}</td><td>{c.categoria}</td><td>{c.conta}</td><td>{c.forma}</td><td>{c.natureza}</td><td>{money(c.valor_previsto)}</td><td className="actions">{c.status==='Previsto'&&<button onClick={()=>confirmarCompromisso(c)}><CheckCircle2 size={15}/></button>}{c.status==='Previsto'&&<button onClick={()=>editarCompromisso(c)}><Edit3 size={15}/></button>}{c.status==='Previsto'&&<button onClick={()=>cancelarCompromisso(c)}><XCircle size={15}/></button>}<button className="danger" onClick={()=>excluirCompromisso(c.id)}><Trash2 size={14}/></button></td></tr>)}
-          {compromissos.length===0&&<tr><td colSpan="8" className="empty">Nenhum compromisso previsto neste ciclo.</td></tr>}
+        <section className="panel"><h2>Compromissos previstos</h2>
+          <div className="filter-grid">
+            <select value={compFiltros.status} onChange={e=>setCompFiltros({...compFiltros,status:e.target.value})}><option>Todos</option><option>Previsto</option><option>Confirmado</option><option>Cancelado</option></select>
+            <select value={compFiltros.conta} onChange={e=>setCompFiltros({...compFiltros,conta:e.target.value})}><option>Todas</option>{CONTAS.map(x=><option key={x}>{x}</option>)}</select>
+            <select value={compFiltros.forma} onChange={e=>setCompFiltros({...compFiltros,forma:e.target.value})}><option>Todas</option>{FORMAS.map(x=><option key={x}>{x}</option>)}</select>
+            <select value={compFiltros.natureza} onChange={e=>setCompFiltros({...compFiltros,natureza:e.target.value})}><option>Todas</option>{NATUREZAS.map(x=><option key={x}>{x}</option>)}</select>
+            <select value={compFiltros.categoria} onChange={e=>setCompFiltros({...compFiltros,categoria:e.target.value})}><option>Todas</option>{CATEGORIAS.map(x=><option key={x}>{x}</option>)}</select>
+            <select value={compFiltros.ordenacao} onChange={e=>setCompFiltros({...compFiltros,ordenacao:e.target.value})}><option value="descricao">Descrição</option><option value="maior">Maior valor</option><option value="menor">Menor valor</option></select>
+            <input placeholder="Buscar compromisso" value={compFiltros.busca} onChange={e=>setCompFiltros({...compFiltros,busca:e.target.value})}/>
+            <button className="ghost" type="button" onClick={limparCompFiltros}>Limpar filtros</button>
+          </div>
+          <div className="summary-row"><span>{compromissosFiltrados.length} compromisso(s)</span><span>Selecionados: {compSelecionados.length}</span><button className="danger" type="button" onClick={excluirCompromissosSelecionados}>Excluir selecionados</button></div>
+          <div className="table-wrap"><table><thead><tr><th><input type="checkbox" checked={compromissosFiltrados.length>0 && compromissosFiltrados.every(c=>compSelecionados.includes(c.id))} onChange={toggleTodosCompromissos}/></th><th>Status</th><th>Descrição</th><th>Categoria</th><th>Conta</th><th>Forma</th><th>Natureza</th><th>Valor</th><th>Ações</th></tr></thead><tbody>
+          {compromissosFiltrados.map(c=><tr key={c.id} className={c.status!=='Previsto'?'muted-row':''}><td><input type="checkbox" checked={compSelecionados.includes(c.id)} onChange={()=>toggleCompSelecionado(c.id)}/></td><td>{c.status}</td><td>{c.descricao}</td><td>{c.categoria}</td><td><span className="bank-pill"><b className="dot" style={{background:getContaColor(c.conta)}}></b>{c.conta}</span></td><td>{c.forma}</td><td>{c.natureza}</td><td>{money(c.valor_previsto)}</td><td className="actions">{c.status==='Previsto'&&<button onClick={()=>confirmarCompromisso(c)}><CheckCircle2 size={15}/></button>}{c.status==='Previsto'&&<button onClick={()=>editarCompromisso(c)}><Edit3 size={15}/></button>}{c.status==='Previsto'&&<button onClick={()=>cancelarCompromisso(c)}><XCircle size={15}/></button>}<button className="danger" onClick={()=>excluirCompromisso(c.id)}><Trash2 size={14}/></button></td></tr>)}
+          {compromissosFiltrados.length===0&&<tr><td colSpan="9" className="empty">Nenhum compromisso encontrado com os filtros atuais.</td></tr>}
         </tbody></table></div></section>
         <section className="panel"><h2>Filtros dos lançamentos</h2><div className="filter-grid">
           <input type="date" value={filtros.dataInicio} onChange={e=>setFiltros({...filtros,dataInicio:e.target.value})}/>
@@ -570,7 +634,7 @@ function App(){
           <button className="ghost" type="button" onClick={limparFiltros}>Limpar filtros</button>
         </div><div className="summary-row"><span>{resumoFiltros.quantidade} lançamentos</span><span>Receitas: {money(resumoFiltros.receitas)}</span><span>Despesas: {money(resumoFiltros.despesas)}</span><span>Investimentos: {money(resumoFiltros.investimentos)}</span><span>Faturas: {money(resumoFiltros.faturas)}</span></div></section>
         <section className="panel"><h2>Lançamentos reais do ciclo</h2><div className="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Conta</th><th>Forma</th><th>Natureza</th><th>Descrição</th><th>Valor</th><th>Ações</th></tr></thead><tbody>
-          {transacoesFiltradas.map(t=><tr key={t.id}><td>{formatBR(t.data)}</td><td>{t.tipo}</td><td>{t.categoria}</td><td>{t.conta}</td><td>{t.forma}</td><td>{t.natureza}</td><td>{t.descricao}</td><td>{money(t.valor)}</td><td className="actions"><button title="Editar" onClick={()=>editarTransacao(t)}><Edit3 size={14}/></button><button title="Duplicar" onClick={()=>duplicarTransacao(t)}><Copy size={14}/></button><button className="danger" title="Excluir" onClick={()=>excluir(t.id)}><Trash2 size={14}/></button></td></tr>)}
+          {transacoesFiltradas.map(t=><tr key={t.id}><td>{formatBR(t.data)}</td><td>{t.tipo}</td><td>{t.categoria}</td><td><span className="bank-pill"><b className="dot" style={{background:getContaColor(t.conta)}}></b>{t.conta}</span></td><td>{t.forma}</td><td>{t.natureza}</td><td>{t.descricao}</td><td>{money(t.valor)}</td><td className="actions"><button title="Editar" onClick={()=>editarTransacao(t)}><Edit3 size={14}/></button><button title="Duplicar" onClick={()=>duplicarTransacao(t)}><Copy size={14}/></button><button className="danger" title="Excluir" onClick={()=>excluir(t.id)}><Trash2 size={14}/></button></td></tr>)}
           {transacoesFiltradas.length===0&&<tr><td colSpan="9" className="empty">Nenhum lançamento encontrado com os filtros atuais.</td></tr>}
         </tbody></table></div></section>
       </>}
@@ -621,12 +685,12 @@ function App(){
           <div className="panel"><h2>Gastos variáveis por dia</h2><div className="chart"><ResponsiveContainer width="100%" height={280}><LineChart data={porDiaVariavel}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="dia"/><YAxis/><Tooltip formatter={(v)=>money(v)}/><Line type="monotone" dataKey="valor" strokeWidth={3} dot stroke="#60a5fa"/></LineChart></ResponsiveContainer></div></div>
         </section>
         <section className="layout">
-          <div className="panel"><h2>Gastos reais por conta</h2><div className="chart"><ResponsiveContainer width="100%" height={240}><BarChart data={porConta}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="conta"/><YAxis/><Tooltip formatter={(v)=>money(v)}/><Bar dataKey="valor" radius={[8,8,0,0]}>{porConta.map((_,i)=><Cell key={i} fill={COLORS[i]}/>)}</Bar></BarChart></ResponsiveContainer></div></div>
+          <div className="panel"><h2>Gastos reais por conta</h2><div className="chart"><ResponsiveContainer width="100%" height={240}><BarChart data={porConta}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="conta"/><YAxis/><Tooltip formatter={(v)=>money(v)}/><Bar dataKey="valor" radius={[8,8,0,0]}>{porConta.map((item)=><Cell key={item.conta} fill={getContaColor(item.conta)}/>)}</Bar></BarChart></ResponsiveContainer></div></div>
           <div className="panel"><h2>Gastos fixos x variáveis</h2><div className="chart"><ResponsiveContainer width="100%" height={240}><BarChart data={fixosVariaveis}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="natureza"/><YAxis/><Tooltip formatter={(v)=>money(v)}/><Bar dataKey="valor" radius={[8,8,0,0]}>{fixosVariaveis.map((_,i)=><Cell key={i} fill={COLORS[i+4]}/>)}</Bar></BarChart></ResponsiveContainer></div></div>
         </section>
         <section className="layout">
-          <div className="panel"><h2>Resumo por categoria</h2><div className="simple-list">{porCategoria.map((c,i)=><div key={c.categoria}><span><b className="dot" style={{background:COLORS[i%COLORS.length]}}></b>{c.categoria}</span><b>{money(c.valor)} • {pct(c.valor,dash.receitaTotal)}</b></div>)}</div></div>
-          <div className="panel"><h2>Resumo fixos x variáveis</h2><div className="simple-list">{fixosVariaveis.map((n,i)=><div key={n.natureza}><span><b className="dot" style={{background:COLORS[i+4]}}></b>{n.natureza}</span><b>{money(n.valor)} • {pct(n.valor,dash.receitaTotal)}</b></div>)}</div></div>
+          <div className="panel"><h2>Resumo por categoria</h2><div className="simple-list">{porCategoria.map((c,i)=><div key={c.categoria}><span><b className="dot" style={{background:COLORS[i%COLORS.length]}}></b>{c.categoria}</span><b>{money(c.valor)} • {pct(c.valor,dash.receitaTotal)}</b><button className="mini-button" onClick={()=>setCategoriaAberta(categoriaAberta===c.categoria?null:c.categoria)}>{categoriaAberta===c.categoria?'Fechar':'Ver gastos'}</button></div>)}</div>{categoriaAberta&&<div className="detail-list"><h3>{categoriaAberta} — do maior para o menor</h3>{detalhesCategoriaSelecionada.map(t=><div key={t.id}><span>{formatBR(t.data)} • {t.descricao}</span><b>{money(t.valor)}</b></div>)}{detalhesCategoriaSelecionada.length===0&&<p className="chart-note">Nenhum gasto encontrado.</p>}</div>}</div>
+          <div className="panel"><h2>Resumo fixos x variáveis</h2><div className="simple-list">{fixosVariaveis.map((n,i)=><div key={n.natureza}><span><b className="dot" style={{background:COLORS[i+4]}}></b>{n.natureza}</span><b>{money(n.valor)} • {pct(n.valor,dash.receitaTotal)}</b><button className="mini-button" onClick={()=>setNaturezaAberta(naturezaAberta===n.natureza?null:n.natureza)}>{naturezaAberta===n.natureza?'Fechar':'Ver gastos'}</button></div>)}</div>{naturezaAberta&&<div className="detail-list"><h3>{naturezaAberta} — do maior para o menor</h3>{detalhesNaturezaSelecionada.map(t=><div key={t.id}><span>{formatBR(t.data)} • {t.categoria} • {t.descricao}</span><b>{money(t.valor)}</b></div>)}{detalhesNaturezaSelecionada.length===0&&<p className="chart-note">Nenhum gasto encontrado.</p>}</div>}</div>
         </section>
       </>}
     </main>
