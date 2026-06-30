@@ -80,6 +80,11 @@ function AuthScreen(){
   </div></div>
 }
 
+
+function Field({label, children}){
+  return <label className="field-label"><span>{label}</span>{children}</label>
+}
+
 function App(){
   const c0=cycleFromDate()
   const [session,setSession]=useState(null)
@@ -116,6 +121,7 @@ function App(){
   const emptyCompFiltros = {status:'Todos', conta:'Todas', forma:'Todas', natureza:'Todas', categoria:'Todas', busca:'', ordenacao:'recentes'}
   const [compFiltros,setCompFiltros]=useState(()=>safeJSON('leo_filtros_compromissos', emptyCompFiltros))
   const [compSelecionados,setCompSelecionados]=useState([])
+  const [transSelecionadas,setTransSelecionadas]=useState([])
   const [categoriaAberta,setCategoriaAberta]=useState(null)
   const [naturezaAberta,setNaturezaAberta]=useState(null)
   const [dashboardDetalhe,setDashboardDetalhe]=useState(null)
@@ -526,8 +532,23 @@ function App(){
     return arr
   },[compromissos,compFiltros])
 
-  function limparFiltros(){ setFiltros(emptyFiltros) }
+  function limparFiltros(){ setFiltros(emptyFiltros); setTransSelecionadas([]) }
   function limparCompFiltros(){ setCompFiltros(emptyCompFiltros); setCompSelecionados([]) }
+  function toggleTransSelecionada(id){
+    setTransSelecionadas(prev=>prev.includes(id) ? prev.filter(x=>x!==id) : [...prev,id])
+  }
+  function toggleTodasTransacoes(){
+    const ids=transacoesFiltradas.map(t=>t.id)
+    const todasSelecionadas=ids.length>0 && ids.every(id=>transSelecionadas.includes(id))
+    setTransSelecionadas(todasSelecionadas ? transSelecionadas.filter(id=>!ids.includes(id)) : Array.from(new Set([...transSelecionadas,...ids])))
+  }
+  async function excluirTransacoesSelecionadas(){
+    if(transSelecionadas.length===0) return alert('Selecione pelo menos um lançamento.')
+    if(!confirm(`Excluir ${transSelecionadas.length} lançamento(s) selecionado(s)?`)) return
+    const {error}=await supabase.from('transacoes').delete().in('id',transSelecionadas)
+    if(error) alert(error.message)
+    else { setTransSelecionadas([]); carregar() }
+  }
   function toggleCompSelecionado(id){
     setCompSelecionados(prev=>prev.includes(id) ? prev.filter(x=>x!==id) : [...prev,id])
   }
@@ -568,7 +589,7 @@ function App(){
   function exportarBackupJSON(){
     const payload = {
       app:'Leo Finance',
-      version:'1.2.5',
+      version:'1.2.6',
       exported_at:new Date().toISOString(),
       ciclo:{inicio:inicioCiclo,fim:fimCiclo},
       meta_aporte:metaAporte,
@@ -696,14 +717,14 @@ function App(){
           </div><button>{editingCompromisso?'Salvar edição':'Adicionar compromisso'}</button>{editingCompromisso&&<button type="button" className="ghost full" onClick={()=>{setEditingCompromisso(null);setCompForm(emptyCompForm)}}>Cancelar edição</button>}</form>
         </section>
         <section className="panel"><h2>Compromissos previstos</h2>
-          <div className="filter-grid">
-            <select value={compFiltros.status} onChange={e=>setCompFiltros({...compFiltros,status:e.target.value})}><option>Todos</option><option>Previsto</option><option>Confirmado</option><option>Cancelado</option></select>
-            <select value={compFiltros.conta} onChange={e=>setCompFiltros({...compFiltros,conta:e.target.value})}><option>Todas</option>{CONTAS.map(x=><option key={x}>{x}</option>)}</select>
-            <select value={compFiltros.forma} onChange={e=>setCompFiltros({...compFiltros,forma:e.target.value})}><option>Todas</option>{FORMAS.map(x=><option key={x}>{x}</option>)}</select>
-            <select value={compFiltros.natureza} onChange={e=>setCompFiltros({...compFiltros,natureza:e.target.value})}><option>Todas</option>{NATUREZAS.map(x=><option key={x}>{x}</option>)}</select>
-            <select value={compFiltros.categoria} onChange={e=>setCompFiltros({...compFiltros,categoria:e.target.value})}><option>Todas</option>{CATEGORIAS.map(x=><option key={x}>{x}</option>)}</select>
-            <select value={compFiltros.ordenacao} onChange={e=>setCompFiltros({...compFiltros,ordenacao:e.target.value})}><option value="descricao">Descrição</option><option value="maior">Maior valor</option><option value="menor">Menor valor</option></select>
-            <input placeholder="Buscar compromisso" value={compFiltros.busca} onChange={e=>setCompFiltros({...compFiltros,busca:e.target.value})}/>
+          <div className="filter-grid labeled">
+            <Field label="Status"><select value={compFiltros.status} onChange={e=>setCompFiltros({...compFiltros,status:e.target.value})}><option>Todos</option><option>Previsto</option><option>Confirmado</option><option>Cancelado</option></select></Field>
+            <Field label="Instituição"><select value={compFiltros.conta} onChange={e=>setCompFiltros({...compFiltros,conta:e.target.value})}><option>Todas</option>{CONTAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            <Field label="Forma"><select value={compFiltros.forma} onChange={e=>setCompFiltros({...compFiltros,forma:e.target.value})}><option>Todas</option>{FORMAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            <Field label="Natureza"><select value={compFiltros.natureza} onChange={e=>setCompFiltros({...compFiltros,natureza:e.target.value})}><option>Todas</option>{NATUREZAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            <Field label="Categoria"><select value={compFiltros.categoria} onChange={e=>setCompFiltros({...compFiltros,categoria:e.target.value})}><option>Todas</option>{CATEGORIAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            <Field label="Ordenação"><select value={compFiltros.ordenacao} onChange={e=>setCompFiltros({...compFiltros,ordenacao:e.target.value})}><option value="descricao">Descrição</option><option value="maior">Maior valor</option><option value="menor">Menor valor</option></select></Field>
+            <Field label="Buscar"><input placeholder="Buscar compromisso" value={compFiltros.busca} onChange={e=>setCompFiltros({...compFiltros,busca:e.target.value})}/></Field>
             <button className="ghost" type="button" onClick={limparCompFiltros}>Limpar filtros</button>
           </div>
           <div className="summary-row"><span>{compromissosFiltrados.length} compromisso(s)</span><span>Selecionados: {compSelecionados.length}</span><button className="danger" type="button" onClick={excluirCompromissosSelecionados}>Excluir selecionados</button></div>
@@ -711,21 +732,21 @@ function App(){
           {compromissosFiltrados.map(c=><tr key={c.id} className={c.status!=='Previsto'?'muted-row':''}><td><input type="checkbox" checked={compSelecionados.includes(c.id)} onChange={()=>toggleCompSelecionado(c.id)}/></td><td>{c.status}</td><td>{c.descricao}</td><td>{c.categoria}</td><td><span className="bank-pill"><b className="dot" style={{background:getContaColor(c.conta)}}></b>{c.conta}</span></td><td>{c.forma}</td><td>{c.natureza}</td><td>{money(c.valor_previsto)}</td><td className="actions">{c.status==='Previsto'&&<button onClick={()=>confirmarCompromisso(c)}><CheckCircle2 size={15}/></button>}{c.status==='Previsto'&&<button onClick={()=>editarCompromisso(c)}><Edit3 size={15}/></button>}{c.status==='Previsto'&&<button onClick={()=>cancelarCompromisso(c)}><XCircle size={15}/></button>}<button className="danger" onClick={()=>excluirCompromisso(c.id)}><Trash2 size={14}/></button></td></tr>)}
           {compromissosFiltrados.length===0&&<tr><td colSpan="9" className="empty">Nenhum compromisso encontrado com os filtros atuais.</td></tr>}
         </tbody></table></div></section>
-        <section className="panel"><h2>Filtros dos lançamentos</h2><div className="filter-grid">
-          <input type="date" value={filtros.dataInicio} onChange={e=>setFiltros({...filtros,dataInicio:e.target.value})}/>
-          <input type="date" value={filtros.dataFim} onChange={e=>setFiltros({...filtros,dataFim:e.target.value})}/>
-          <select value={filtros.tipo} onChange={e=>setFiltros({...filtros,tipo:e.target.value})}><option>Todos</option>{TIPOS.map(x=><option key={x}>{x}</option>)}</select>
-          <select value={filtros.conta} onChange={e=>setFiltros({...filtros,conta:e.target.value})}><option>Todas</option>{CONTAS.map(x=><option key={x}>{x}</option>)}</select>
-          <select value={filtros.forma} onChange={e=>setFiltros({...filtros,forma:e.target.value})}><option>Todas</option>{FORMAS.map(x=><option key={x}>{x}</option>)}</select>
-          <select value={filtros.natureza} onChange={e=>setFiltros({...filtros,natureza:e.target.value})}><option>Todas</option>{NATUREZAS.map(x=><option key={x}>{x}</option>)}</select>
-          <select value={filtros.categoria} onChange={e=>setFiltros({...filtros,categoria:e.target.value})}><option>Todas</option>{CATEGORIAS.map(x=><option key={x}>{x}</option>)}</select>
-          <select value={filtros.ordenacao} onChange={e=>setFiltros({...filtros,ordenacao:e.target.value})}><option value="recentes">Mais recentes</option><option value="antigos">Mais antigos</option><option value="maior">Maior valor</option><option value="menor">Menor valor</option></select>
-          <input placeholder="Buscar descrição" value={filtros.busca} onChange={e=>setFiltros({...filtros,busca:e.target.value})}/>
+        <section className="panel"><h2>Filtros dos lançamentos</h2><div className="filter-grid labeled">
+          <Field label="Data inicial"><input type="date" value={filtros.dataInicio} onChange={e=>setFiltros({...filtros,dataInicio:e.target.value})}/></Field>
+          <Field label="Data final"><input type="date" value={filtros.dataFim} onChange={e=>setFiltros({...filtros,dataFim:e.target.value})}/></Field>
+          <Field label="Tipo"><select value={filtros.tipo} onChange={e=>setFiltros({...filtros,tipo:e.target.value})}><option>Todos</option>{TIPOS.map(x=><option key={x}>{x}</option>)}</select></Field>
+          <Field label="Instituição"><select value={filtros.conta} onChange={e=>setFiltros({...filtros,conta:e.target.value})}><option>Todas</option>{CONTAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+          <Field label="Forma"><select value={filtros.forma} onChange={e=>setFiltros({...filtros,forma:e.target.value})}><option>Todas</option>{FORMAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+          <Field label="Natureza"><select value={filtros.natureza} onChange={e=>setFiltros({...filtros,natureza:e.target.value})}><option>Todas</option>{NATUREZAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+          <Field label="Categoria"><select value={filtros.categoria} onChange={e=>setFiltros({...filtros,categoria:e.target.value})}><option>Todas</option>{CATEGORIAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+          <Field label="Ordenação"><select value={filtros.ordenacao} onChange={e=>setFiltros({...filtros,ordenacao:e.target.value})}><option value="recentes">Mais recentes</option><option value="antigos">Mais antigos</option><option value="maior">Maior valor</option><option value="menor">Menor valor</option></select></Field>
+          <Field label="Buscar"><input placeholder="Buscar descrição" value={filtros.busca} onChange={e=>setFiltros({...filtros,busca:e.target.value})}/></Field>
           <button className="ghost" type="button" onClick={limparFiltros}>Limpar filtros</button>
-        </div><div className="summary-row"><span>{resumoFiltros.quantidade} lançamentos</span><span>Receitas: {money(resumoFiltros.receitas)}</span><span>Despesas: {money(resumoFiltros.despesas)}</span><span>Investimentos: {money(resumoFiltros.investimentos)}</span><span>Faturas: {money(resumoFiltros.faturas)}</span></div></section>
-        <section className="panel"><h2>Lançamentos reais do ciclo</h2><div className="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Conta</th><th>Forma</th><th>Natureza</th><th>Descrição</th><th>Valor</th><th>Ações</th></tr></thead><tbody>
-          {transacoesFiltradas.map(t=><tr key={t.id}><td>{formatBR(t.data)}</td><td>{t.tipo}</td><td>{t.categoria}</td><td><span className="bank-pill"><b className="dot" style={{background:getContaColor(t.conta)}}></b>{t.conta}</span></td><td>{t.forma}</td><td>{t.natureza}</td><td>{t.descricao}</td><td>{money(t.valor)}</td><td className="actions"><button title="Editar" onClick={()=>editarTransacao(t)}><Edit3 size={14}/></button><button title="Duplicar" onClick={()=>duplicarTransacao(t)}><Copy size={14}/></button><button className="danger" title="Excluir" onClick={()=>excluir(t.id)}><Trash2 size={14}/></button></td></tr>)}
-          {transacoesFiltradas.length===0&&<tr><td colSpan="9" className="empty">Nenhum lançamento encontrado com os filtros atuais.</td></tr>}
+        </div><div className="summary-row"><span>{resumoFiltros.quantidade} lançamentos</span><span>Selecionados: {transSelecionadas.length}</span><span>Receitas: {money(resumoFiltros.receitas)}</span><span>Despesas: {money(resumoFiltros.despesas)}</span><span>Investimentos: {money(resumoFiltros.investimentos)}</span><span>Faturas: {money(resumoFiltros.faturas)}</span><button className="danger" type="button" onClick={excluirTransacoesSelecionadas}>Excluir selecionados</button></div></section>
+        <section className="panel"><h2>Lançamentos reais do ciclo</h2><div className="table-wrap"><table><thead><tr><th><input type="checkbox" checked={transacoesFiltradas.length>0 && transacoesFiltradas.every(t=>transSelecionadas.includes(t.id))} onChange={toggleTodasTransacoes}/></th><th>Data</th><th>Tipo</th><th>Categoria</th><th>Conta</th><th>Forma</th><th>Natureza</th><th>Descrição</th><th>Valor</th><th>Ações</th></tr></thead><tbody>
+          {transacoesFiltradas.map(t=><tr key={t.id}><td><input type="checkbox" checked={transSelecionadas.includes(t.id)} onChange={()=>toggleTransSelecionada(t.id)}/></td><td>{formatBR(t.data)}</td><td>{t.tipo}</td><td>{t.categoria}</td><td><span className="bank-pill"><b className="dot" style={{background:getContaColor(t.conta)}}></b>{t.conta}</span></td><td>{t.forma}</td><td>{t.natureza}</td><td>{t.descricao}</td><td>{money(t.valor)}</td><td className="actions"><button title="Editar" onClick={()=>editarTransacao(t)}><Edit3 size={14}/></button><button title="Duplicar" onClick={()=>duplicarTransacao(t)}><Copy size={14}/></button><button className="danger" title="Excluir" onClick={()=>excluir(t.id)}><Trash2 size={14}/></button></td></tr>)}
+          {transacoesFiltradas.length===0&&<tr><td colSpan="10" className="empty">Nenhum lançamento encontrado com os filtros atuais.</td></tr>}
         </tbody></table></div></section>
       </>}
 

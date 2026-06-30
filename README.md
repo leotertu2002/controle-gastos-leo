@@ -9,3 +9,10 @@ Inclui:
 - Botão para aplicar padrões ao Planejamento atual quando desejado.
 - Remoção das cores dos bancos da tela de Configurações.
 - Mantém dados existentes e não exige SQL novo.
+
+
+## V1.2.6
+
+- Padronização de títulos nos filtros de lançamentos e compromissos.
+- Seleção e exclusão em lote também para lançamentos reais.
+- Ajustes visuais de campos para manter a interface mais clara.

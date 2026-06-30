@@ -26,3 +26,4 @@ input[type="checkbox"]{width:16px;height:16px;accent-color:#6366f1}
 .topbar{margin-left:76px;padding-left:calc(5vw + 6px)}
 main{margin-left:76px}
 @media(max-width:950px){.sidebar{width:100%;height:64px;right:0;bottom:auto;flex-direction:row;padding:8px 10px;border-right:0;border-bottom:1px solid #26304d}.sidebar-logo{width:42px;height:42px;margin:0 8px 0 0}.sidebar-nav{flex-direction:row;gap:8px;justify-content:center}.sidebar button{width:42px;height:42px;border-radius:13px}.sidebar-logout{margin-top:0!important;margin-left:8px!important}.sidebar-tooltip{display:none}.topbar{margin-left:0;margin-top:64px;padding-left:18px}main{margin-left:0}.toolbar{margin-top:0}}
+.field-label{display:flex;flex-direction:column;gap:6px;color:#aab4d4;font-size:12px;font-weight:700;letter-spacing:.01em}.field-label input,.field-label select{width:100%}.filter-grid.labeled{align-items:end}.filter-grid.labeled .ghost,.filter-grid.labeled .danger{align-self:end;min-height:44px}
