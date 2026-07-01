@@ -129,6 +129,8 @@ function App(){
   const [dashboardDetalhe,setDashboardDetalhe]=useState(null)
   const [buscaGlobal,setBuscaGlobal]=useState('')
   const [resultadoAberto,setResultadoAberto]=useState(false)
+  const [lancamentoPainel,setLancamentoPainel]=useState('real')
+  const [gestaoTipo,setGestaoTipo]=useState('assinaturas')
 
   useEffect(()=>{
     supabase.auth.getSession().then(({data})=>{setSession(data.session);setLoading(false)})
@@ -425,9 +427,11 @@ function App(){
     const compromissosProximoLista=todosCompromissos
       .filter(c=>c.status==='Previsto' && c.ciclo_inicio===proximo.start && c.ciclo_fim===proximo.end)
     const obrigacoesDebitoLista=compromissosProximoLista.filter(c=>c.forma==='Débito/PIX')
-    const compromissosCreditoLista=compromissosProximoLista.filter(c=>c.forma==='Crédito')
     const obrigacoesDebito=obrigacoesDebitoLista.reduce((s,c)=>s+Number(c.valor_previsto),0)
-    const compromissosCredito=compromissosCreditoLista.reduce((s,c)=>s+Number(c.valor_previsto),0)
+    const compromissosCreditoCicloLista=compromissos.filter(c=>c.status==='Previsto' && c.forma==='Crédito')
+    const compromissosCreditoCiclo=compromissosCreditoCicloLista.reduce((s,c)=>s+Number(c.valor_previsto),0)
+    const creditoUtilizadoAtual=transacoes.filter(t=>t.forma==='Crédito'&&t.tipo==='Despesa').reduce((s,t)=>s+Number(t.valor),0)
+    const referenciaFaturaCicloAtual=creditoUtilizadoAtual+compromissosCreditoCiclo
     const totalObrigacoes=fatura+obrigacoesDebito
     const sobraAntesCaixa=receitas-totalObrigacoes-aporte
     const resgateNecessario=Math.max(0,caixaDesejado-sobraAntesCaixa)
@@ -438,8 +442,8 @@ function App(){
     else if(aporteExtra>0) saude='Excelente'
     else if(sobraAntesCaixa>=caixaDesejado) saude='Saudável'
     else saude='Atenção'
-    return {receitas,fatura,aporte,caixaDesejado,proximo,obrigacoesDebito,obrigacoesDebitoLista,totalObrigacoes,sobraAntesCaixa,resgateNecessario,aporteExtra,metaDiaria,compromissosCredito,compromissosCreditoLista,saude}
-  },[planejamento,todosCompromissos,inicioCiclo])
+    return {receitas,fatura,aporte,caixaDesejado,proximo,obrigacoesDebito,obrigacoesDebitoLista,totalObrigacoes,sobraAntesCaixa,resgateNecessario,aporteExtra,metaDiaria,compromissosCreditoCiclo,compromissosCreditoCicloLista,creditoUtilizadoAtual,referenciaFaturaCicloAtual,saude}
+  },[planejamento,todosCompromissos,inicioCiclo,compromissos,transacoes])
 
 
   const transacoesFiltradas=useMemo(()=>{
@@ -565,6 +569,15 @@ function App(){
     }).sort((a,b)=>String(a.base).localeCompare(String(b.base)))
   },[todosCompromissos])
 
+
+  const gruposPorTipo=useMemo(()=>({
+    assinaturas: gruposCompromissos.filter(g=>g.tipo==='Recorrente'),
+    parceladas: gruposCompromissos.filter(g=>g.tipo==='Parcelado'),
+    unicos: gruposCompromissos.filter(g=>g.tipo==='Compromisso')
+  }),[gruposCompromissos])
+
+  const gestaoAtual = gestaoTipo === 'assinaturas' ? gruposPorTipo.assinaturas : gestaoTipo === 'parceladas' ? gruposPorTipo.parceladas : gruposPorTipo.unicos
+
   async function editarGrupoCompromissos(grupo){
     const primeira=grupo.items[0]
     if(!primeira) return
@@ -660,7 +673,7 @@ function App(){
   function exportarBackupJSON(){
     const payload = {
       app:'Leo Finance',
-      version:'1.2.7',
+      version:'1.2.8',
       exported_at:new Date().toISOString(),
       ciclo:{inicio:inicioCiclo,fim:fimCiclo},
       meta_aporte:metaAporte,
@@ -761,86 +774,113 @@ function App(){
       </>}
 
       {tab==='lancamentos' && <>
-        <section className="layout">
-          <form className="panel form" onSubmit={adicionar}><h2><Plus size={18}/> {editingTransacao?'Editar lançamento real':'Novo lançamento real'}</h2><div className="form-grid">
-            <input type="date" value={form.data} onChange={e=>setForm({...form,data:e.target.value})} required/>
-            <select value={form.tipo} onChange={e=>setForm({...form,tipo:e.target.value})}>{TIPOS.map(x=><option key={x}>{x}</option>)}</select>
-            <select value={form.categoria} onChange={e=>setForm({...form,categoria:e.target.value})}>{CATEGORIAS.map(x=><option key={x}>{x}</option>)}</select>
-            <select value={form.conta} onChange={e=>setForm({...form,conta:e.target.value})}>{CONTAS.map(x=><option key={x}>{x}</option>)}</select>
-            <select value={form.forma} onChange={e=>setForm({...form,forma:e.target.value})}>{FORMAS.map(x=><option key={x}>{x}</option>)}</select>
-            <select value={form.natureza} onChange={e=>setForm({...form,natureza:e.target.value})}>{NATUREZAS.map(x=><option key={x}>{x}</option>)}</select>
-            {form.tipo==='Despesa' && <select value={form.parcelamento} onChange={e=>setForm({...form,parcelamento:e.target.value})} disabled={!!editingTransacao}>{PARCELAMENTOS.map(x=><option key={x}>{x}</option>)}</select>}
-            {form.tipo==='Despesa' && form.parcelamento === 'Parcelado' && !editingTransacao && <input placeholder="Quantidade de parcelas" type="number" min="2" step="1" value={form.quantidade_parcelas} onChange={e=>setForm({...form,quantidade_parcelas:e.target.value})} required/>}
-            <input placeholder="Descrição" value={form.descricao} onChange={e=>setForm({...form,descricao:e.target.value})} required/>
-            <input placeholder={form.parcelamento === 'Parcelado' ? 'Valor total da compra' : 'Valor'} type="number" step="0.01" value={form.valor} onChange={e=>setForm({...form,valor:e.target.value})} required/>
-          </div><button>{editingTransacao?'Salvar edição':'Adicionar lançamento'}</button>{editingTransacao&&<button type="button" className="ghost full" onClick={()=>{setEditingTransacao(null);setForm({...emptyForm,data:isoToday()})}}>Cancelar edição</button>}</form>
-
-          <form className="panel form" onSubmit={salvarCompromisso}><h2><Plus size={18}/> Compromisso previsto</h2><div className="form-grid">
-            <input placeholder="Descrição" value={compForm.descricao} onChange={e=>setCompForm({...compForm,descricao:e.target.value})} required/>
-            <input placeholder="Valor previsto" type="number" step="0.01" value={compForm.valor_previsto} onChange={e=>setCompForm({...compForm,valor_previsto:e.target.value})} required/>
-            <select value={compForm.categoria} onChange={e=>setCompForm({...compForm,categoria:e.target.value})}>{CATEGORIAS.map(x=><option key={x}>{x}</option>)}</select>
-            <select value={compForm.conta} onChange={e=>setCompForm({...compForm,conta:e.target.value})}>{CONTAS.map(x=><option key={x}>{x}</option>)}</select>
-            <select value={compForm.forma} onChange={e=>setCompForm({...compForm,forma:e.target.value})}>{FORMAS.map(x=><option key={x}>{x}</option>)}</select>
-            <select value={compForm.natureza} onChange={e=>setCompForm({...compForm,natureza:e.target.value})}>{NATUREZAS.map(x=><option key={x}>{x}</option>)}</select>
-            {!editingCompromisso && <select value={compForm.plano} onChange={e=>setCompForm({...compForm,plano:e.target.value})}>{COMP_PLANOS.map(x=><option key={x}>{x}</option>)}</select>}
-            {!editingCompromisso && compForm.plano === 'Parcelado' && <input placeholder="Quantidade de parcelas" type="number" min="2" step="1" value={compForm.quantidade_parcelas} onChange={e=>setCompForm({...compForm,quantidade_parcelas:e.target.value})} required/>}
-          </div><button>{editingCompromisso?'Salvar edição':'Adicionar compromisso'}</button>{editingCompromisso&&<button type="button" className="ghost full" onClick={()=>{setEditingCompromisso(null);setCompForm(emptyCompForm)}}>Cancelar edição</button>}</form>
+        <section className="action-card-grid">
+          <button type="button" className={`action-card ${lancamentoPainel==='real'?'active':''}`} onClick={()=>setLancamentoPainel('real')}>
+            <Plus size={24}/><span>Novo lançamento real</span><small>Receitas, despesas, investimentos, pagamento de fatura e compras que começam neste ciclo.</small>
+          </button>
+          <button type="button" className={`action-card ${lancamentoPainel==='compromisso'?'active':''}`} onClick={()=>setLancamentoPainel('compromisso')}>
+            <ClipboardList size={24}/><span>Novo compromisso futuro</span><small>Compromisso único, compra parcelada futura ou assinatura recorrente.</small>
+          </button>
+          <button type="button" className={`action-card ${lancamentoPainel==='gestao'?'active':''}`} onClick={()=>setLancamentoPainel('gestao')}>
+            <Settings size={24}/><span>Gestão de compromissos futuros</span><small>Assinaturas, compras parceladas e compromissos únicos agrupados.</small>
+          </button>
+          <button type="button" className={`action-card ${lancamentoPainel==='historico'?'active':''}`} onClick={()=>setLancamentoPainel('historico')}>
+            <Search size={24}/><span>Histórico de lançamentos</span><small>Filtrar, editar, duplicar e excluir lançamentos reais do ciclo.</small>
+          </button>
         </section>
-        <section className="panel"><h2>Compromissos previstos</h2>
-          <div className="filter-grid labeled">
-            <Field label="Status"><select value={compFiltros.status} onChange={e=>setCompFiltros({...compFiltros,status:e.target.value})}><option>Todos</option><option>Previsto</option><option>Confirmado</option><option>Cancelado</option></select></Field>
-            <Field label="Instituição"><select value={compFiltros.conta} onChange={e=>setCompFiltros({...compFiltros,conta:e.target.value})}><option>Todas</option>{CONTAS.map(x=><option key={x}>{x}</option>)}</select></Field>
-            <Field label="Forma"><select value={compFiltros.forma} onChange={e=>setCompFiltros({...compFiltros,forma:e.target.value})}><option>Todas</option>{FORMAS.map(x=><option key={x}>{x}</option>)}</select></Field>
-            <Field label="Natureza"><select value={compFiltros.natureza} onChange={e=>setCompFiltros({...compFiltros,natureza:e.target.value})}><option>Todas</option>{NATUREZAS.map(x=><option key={x}>{x}</option>)}</select></Field>
-            <Field label="Categoria"><select value={compFiltros.categoria} onChange={e=>setCompFiltros({...compFiltros,categoria:e.target.value})}><option>Todas</option>{CATEGORIAS.map(x=><option key={x}>{x}</option>)}</select></Field>
-            <Field label="Ordenação"><select value={compFiltros.ordenacao} onChange={e=>setCompFiltros({...compFiltros,ordenacao:e.target.value})}><option value="descricao">Descrição</option><option value="maior">Maior valor</option><option value="menor">Menor valor</option></select></Field>
-            <Field label="Buscar"><input placeholder="Buscar compromisso" value={compFiltros.busca} onChange={e=>setCompFiltros({...compFiltros,busca:e.target.value})}/></Field>
-            <button className="ghost" type="button" onClick={limparCompFiltros}>Limpar filtros</button>
-          </div>
-          <div className="summary-row"><span>{compromissosFiltrados.length} compromisso(s)</span><span>Selecionados: {compSelecionados.length}</span><button className="danger" type="button" onClick={excluirCompromissosSelecionados}>Excluir selecionados</button></div>
-          <div className="table-wrap"><table><thead><tr><th><input type="checkbox" checked={compromissosFiltrados.length>0 && compromissosFiltrados.every(c=>compSelecionados.includes(c.id))} onChange={toggleTodosCompromissos}/></th><th>Status</th><th>Descrição</th><th>Categoria</th><th>Conta</th><th>Forma</th><th>Natureza</th><th>Valor</th><th>Ações</th></tr></thead><tbody>
-          {compromissosFiltrados.map(c=><tr key={c.id} className={c.status!=='Previsto'?'muted-row':''}><td><input type="checkbox" checked={compSelecionados.includes(c.id)} onChange={()=>toggleCompSelecionado(c.id)}/></td><td>{c.status}</td><td>{c.descricao}</td><td>{c.categoria}</td><td><span className="bank-pill"><b className="dot" style={{background:getContaColor(c.conta)}}></b>{c.conta}</span></td><td>{c.forma}</td><td>{c.natureza}</td><td>{money(c.valor_previsto)}</td><td className="actions">{c.status==='Previsto'&&<button onClick={()=>confirmarCompromisso(c)}><CheckCircle2 size={15}/></button>}{c.status==='Previsto'&&<button onClick={()=>editarCompromisso(c)}><Edit3 size={15}/></button>}{c.status==='Previsto'&&<button onClick={()=>cancelarCompromisso(c)}><XCircle size={15}/></button>}<button className="danger" onClick={()=>excluirCompromisso(c.id)}><Trash2 size={14}/></button></td></tr>)}
-          {compromissosFiltrados.length===0&&<tr><td colSpan="9" className="empty">Nenhum compromisso encontrado com os filtros atuais.</td></tr>}
-        </tbody></table></div></section>
 
-        <section className="panel"><h2>Gestão de compromissos</h2>
-          <p className="chart-note">Agrupa parcelas, recorrências e compromissos parecidos para facilitar edição em lote, exclusão e limpeza de duplicados.</p>
-          <div className="commitment-groups">
-            {gruposCompromissos.map(g=><div key={g.key} className="commitment-group">
-              <div className="commitment-group-head">
-                <button className="group-title" type="button" onClick={()=>setGrupoAberto(grupoAberto===g.key?null:g.key)}>
-                  <ChevronDown size={16}/>
-                  <span><b>{g.base}</b><small>{g.tipo} • {g.items.length} ocorrência(s) futura(s) • {g.contas.join(', ')} • {g.formas.join(', ')}</small></span>
-                </button>
+        {lancamentoPainel==='real' && <section className="panel form"><form onSubmit={adicionar}><h2><Plus size={18}/> {editingTransacao?'Editar lançamento real':'Novo lançamento real'}</h2><div className="form-grid">
+            <Field label="Data"><input type="date" value={form.data} onChange={e=>setForm({...form,data:e.target.value})} required/></Field>
+            <Field label="Tipo"><select value={form.tipo} onChange={e=>setForm({...form,tipo:e.target.value})}>{TIPOS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            <Field label="Categoria"><select value={form.categoria} onChange={e=>setForm({...form,categoria:e.target.value})}>{CATEGORIAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            <Field label="Instituição"><select value={form.conta} onChange={e=>setForm({...form,conta:e.target.value})}>{CONTAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            <Field label="Forma"><select value={form.forma} onChange={e=>setForm({...form,forma:e.target.value})}>{FORMAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            <Field label="Natureza"><select value={form.natureza} onChange={e=>setForm({...form,natureza:e.target.value})}>{NATUREZAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            {form.tipo==='Despesa' && <Field label="Recorrência/parcelamento"><select value={form.parcelamento} onChange={e=>setForm({...form,parcelamento:e.target.value})} disabled={!!editingTransacao}>{PARCELAMENTOS.map(x=><option key={x}>{x}</option>)}</select></Field>}
+            {form.tipo==='Despesa' && form.parcelamento === 'Parcelado' && !editingTransacao && <Field label="Quantidade de parcelas"><input type="number" min="2" step="1" value={form.quantidade_parcelas} onChange={e=>setForm({...form,quantidade_parcelas:e.target.value})} required/></Field>}
+            <Field label="Descrição"><input placeholder="Ex.: Uber, Salário, Mercado" value={form.descricao} onChange={e=>setForm({...form,descricao:e.target.value})} required/></Field>
+            <Field label={form.parcelamento === 'Parcelado' ? 'Valor total da compra' : 'Valor'}><input type="number" step="0.01" value={form.valor} onChange={e=>setForm({...form,valor:e.target.value})} required/></Field>
+          </div><button>{editingTransacao?'Salvar edição':'Adicionar lançamento'}</button>{editingTransacao&&<button type="button" className="ghost full" onClick={()=>{setEditingTransacao(null);setForm({...emptyForm,data:isoToday()})}}>Cancelar edição</button>}</form></section>}
+
+        {lancamentoPainel==='compromisso' && <section className="panel form"><form onSubmit={salvarCompromisso}><h2><Plus size={18}/> Novo compromisso futuro</h2><p className="chart-note">Use para boletos futuros, compras parceladas que ainda não começaram ou assinaturas sem previsão de término.</p><div className="form-grid">
+            <Field label="Descrição"><input placeholder="Ex.: ChatGPT, Passagem Europa, Consórcio" value={compForm.descricao} onChange={e=>setCompForm({...compForm,descricao:e.target.value})} required/></Field>
+            <Field label="Valor previsto / valor da parcela"><input type="number" step="0.01" value={compForm.valor_previsto} onChange={e=>setCompForm({...compForm,valor_previsto:e.target.value})} required/></Field>
+            <Field label="Categoria"><select value={compForm.categoria} onChange={e=>setCompForm({...compForm,categoria:e.target.value})}>{CATEGORIAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            <Field label="Instituição"><select value={compForm.conta} onChange={e=>setCompForm({...compForm,conta:e.target.value})}>{CONTAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            <Field label="Forma"><select value={compForm.forma} onChange={e=>setCompForm({...compForm,forma:e.target.value})}>{FORMAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            <Field label="Natureza"><select value={compForm.natureza} onChange={e=>setCompForm({...compForm,natureza:e.target.value})}>{NATUREZAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            {!editingCompromisso && <Field label="Tipo de compromisso"><select value={compForm.plano} onChange={e=>setCompForm({...compForm,plano:e.target.value})}>{COMP_PLANOS.map(x=><option key={x}>{x}</option>)}</select></Field>}
+            {!editingCompromisso && compForm.plano === 'Parcelado' && <Field label="Quantidade de parcelas"><input type="number" min="2" step="1" value={compForm.quantidade_parcelas} onChange={e=>setCompForm({...compForm,quantidade_parcelas:e.target.value})} required/></Field>}
+          </div><button>{editingCompromisso?'Salvar edição':'Adicionar compromisso'}</button>{editingCompromisso&&<button type="button" className="ghost full" onClick={()=>{setEditingCompromisso(null);setCompForm(emptyCompForm)}}>Cancelar edição</button>}</form></section>}
+
+        {lancamentoPainel==='gestao' && <section className="panel"><h2>Gestão de compromissos futuros</h2>
+          <p className="chart-note">Organize separadamente assinaturas sem prazo, compras parceladas e compromissos únicos. A gestão é feita sobre compromissos futuros ainda previstos.</p>
+          <div className="subtabs">
+            <button className={gestaoTipo==='assinaturas'?'active':''} onClick={()=>setGestaoTipo('assinaturas')} type="button">Assinaturas ({gruposPorTipo.assinaturas.length})</button>
+            <button className={gestaoTipo==='parceladas'?'active':''} onClick={()=>setGestaoTipo('parceladas')} type="button">Compras parceladas ({gruposPorTipo.parceladas.length})</button>
+            <button className={gestaoTipo==='unicos'?'active':''} onClick={()=>setGestaoTipo('unicos')} type="button">Compromissos únicos ({gruposPorTipo.unicos.length})</button>
+          </div>
+          {gestaoTipo==='assinaturas' && <p className="chart-note">Assinaturas são recorrências sem data final clara. Hoje o sistema mantém ocorrências futuras geradas para os próximos ciclos; cancelar/excluir o grupo remove as ocorrências previstas, sem apagar histórico já realizado.</p>}
+          {gestaoTipo==='parceladas' && <p className="chart-note">Compras parceladas têm início e fim. Use “Ver parcelas” para conferir o cronograma e “Editar grupo” para alterar as parcelas futuras de uma vez.</p>}
+          {gestaoTipo==='unicos' && <p className="chart-note">Compromissos únicos são boletos ou despesas futuras sem repetição aparente.</p>}
+          <div className="commitment-card-grid">
+            {gestaoAtual.map(g=><div key={g.key} className="commitment-card">
+              <div className="commitment-card-top">
+                <span className={`commitment-badge ${g.tipo==='Recorrente'?'recurring':g.tipo==='Parcelado'?'installment':'single'}`}>{g.tipo==='Recorrente'?'Assinatura':g.tipo==='Parcelado'?'Parcelada':'Único'}</span>
                 <strong>{money(g.total)}</strong>
+              </div>
+              <h3>{g.base}</h3>
+              <p>{g.items.length} ocorrência(s) futura(s) • {g.contas.join(', ')} • {g.formas.join(', ')}</p>
+              <p>Próximo ciclo: {g.proximo ? `${formatBR(g.proximo.ciclo_inicio)} a ${formatBR(g.proximo.ciclo_fim)}` : '-'}</p>
+              <div className="commitment-card-actions">
+                <button className="mini-button" type="button" onClick={()=>setGrupoAberto(grupoAberto===g.key?null:g.key)}>{grupoAberto===g.key?'Fechar':'Ver parcelas'}</button>
                 <button className="mini-button" type="button" onClick={()=>editarGrupoCompromissos(g)}>Editar grupo</button>
                 <button className="mini-button" type="button" onClick={()=>excluirDuplicadosGrupo(g)}>Limpar duplicados</button>
                 <button className="danger" type="button" onClick={()=>excluirGrupoCompromissos(g)}>Excluir grupo</button>
               </div>
               {grupoAberto===g.key && <div className="detail-list compact group-details">
-                {g.items.map(c=><div key={c.id}><span>{formatBR(c.ciclo_inicio)} a {formatBR(c.ciclo_fim)} • {c.descricao} • {c.conta} • {c.forma}</span><b>{money(c.valor_previsto)}</b><button className="danger" type="button" onClick={()=>excluirCompromisso(c.id)}>Excluir</button></div>)}
+                {g.items.map(c=><div key={c.id}><span>{formatBR(c.ciclo_inicio)} a {formatBR(c.ciclo_fim)} • {c.descricao} • {c.conta} • {c.forma}</span><b>{money(c.valor_previsto)}</b><button className="danger" type="button" onClick={()=>excluirCompromisso(c.id)}>Excluir esta</button></div>)}
               </div>}
             </div>)}
-            {gruposCompromissos.length===0&&<p className="chart-note">Nenhum compromisso futuro encontrado.</p>}
+            {gestaoAtual.length===0&&<p className="chart-note">Nenhum item encontrado neste grupo.</p>}
           </div>
-        </section>
+        </section>}
 
-        <section className="panel"><h2>Filtros dos lançamentos</h2><div className="filter-grid labeled">
-          <Field label="Data inicial"><input type="date" value={filtros.dataInicio} onChange={e=>setFiltros({...filtros,dataInicio:e.target.value})}/></Field>
-          <Field label="Data final"><input type="date" value={filtros.dataFim} onChange={e=>setFiltros({...filtros,dataFim:e.target.value})}/></Field>
-          <Field label="Tipo"><select value={filtros.tipo} onChange={e=>setFiltros({...filtros,tipo:e.target.value})}><option>Todos</option>{TIPOS.map(x=><option key={x}>{x}</option>)}</select></Field>
-          <Field label="Instituição"><select value={filtros.conta} onChange={e=>setFiltros({...filtros,conta:e.target.value})}><option>Todas</option>{CONTAS.map(x=><option key={x}>{x}</option>)}</select></Field>
-          <Field label="Forma"><select value={filtros.forma} onChange={e=>setFiltros({...filtros,forma:e.target.value})}><option>Todas</option>{FORMAS.map(x=><option key={x}>{x}</option>)}</select></Field>
-          <Field label="Natureza"><select value={filtros.natureza} onChange={e=>setFiltros({...filtros,natureza:e.target.value})}><option>Todas</option>{NATUREZAS.map(x=><option key={x}>{x}</option>)}</select></Field>
-          <Field label="Categoria"><select value={filtros.categoria} onChange={e=>setFiltros({...filtros,categoria:e.target.value})}><option>Todas</option>{CATEGORIAS.map(x=><option key={x}>{x}</option>)}</select></Field>
-          <Field label="Ordenação"><select value={filtros.ordenacao} onChange={e=>setFiltros({...filtros,ordenacao:e.target.value})}><option value="recentes">Mais recentes</option><option value="antigos">Mais antigos</option><option value="maior">Maior valor</option><option value="menor">Menor valor</option></select></Field>
-          <Field label="Buscar"><input placeholder="Buscar descrição" value={filtros.busca} onChange={e=>setFiltros({...filtros,busca:e.target.value})}/></Field>
-          <button className="ghost" type="button" onClick={limparFiltros}>Limpar filtros</button>
-        </div><div className="summary-row"><span>{resumoFiltros.quantidade} lançamentos</span><span>Selecionados: {transSelecionadas.length}</span><span>Receitas: {money(resumoFiltros.receitas)}</span><span>Despesas: {money(resumoFiltros.despesas)}</span><span>Investimentos: {money(resumoFiltros.investimentos)}</span><span>Faturas: {money(resumoFiltros.faturas)}</span><button className="danger" type="button" onClick={excluirTransacoesSelecionadas}>Excluir selecionados</button></div></section>
-        <section className="panel"><h2>Lançamentos reais do ciclo</h2><div className="table-wrap"><table><thead><tr><th><input type="checkbox" checked={transacoesFiltradas.length>0 && transacoesFiltradas.every(t=>transSelecionadas.includes(t.id))} onChange={toggleTodasTransacoes}/></th><th>Data</th><th>Tipo</th><th>Categoria</th><th>Conta</th><th>Forma</th><th>Natureza</th><th>Descrição</th><th>Valor</th><th>Ações</th></tr></thead><tbody>
-          {transacoesFiltradas.map(t=><tr key={t.id}><td><input type="checkbox" checked={transSelecionadas.includes(t.id)} onChange={()=>toggleTransSelecionada(t.id)}/></td><td>{formatBR(t.data)}</td><td>{t.tipo}</td><td>{t.categoria}</td><td><span className="bank-pill"><b className="dot" style={{background:getContaColor(t.conta)}}></b>{t.conta}</span></td><td>{t.forma}</td><td>{t.natureza}</td><td>{t.descricao}</td><td>{money(t.valor)}</td><td className="actions"><button title="Editar" onClick={()=>editarTransacao(t)}><Edit3 size={14}/></button><button title="Duplicar" onClick={()=>duplicarTransacao(t)}><Copy size={14}/></button><button className="danger" title="Excluir" onClick={()=>excluir(t.id)}><Trash2 size={14}/></button></td></tr>)}
-          {transacoesFiltradas.length===0&&<tr><td colSpan="10" className="empty">Nenhum lançamento encontrado com os filtros atuais.</td></tr>}
-        </tbody></table></div></section>
+        {lancamentoPainel==='historico' && <>
+          <section className="panel"><h2>Compromissos previstos do ciclo</h2>
+            <div className="filter-grid labeled">
+              <Field label="Status"><select value={compFiltros.status} onChange={e=>setCompFiltros({...compFiltros,status:e.target.value})}><option>Todos</option><option>Previsto</option><option>Confirmado</option><option>Cancelado</option></select></Field>
+              <Field label="Instituição"><select value={compFiltros.conta} onChange={e=>setCompFiltros({...compFiltros,conta:e.target.value})}><option>Todas</option>{CONTAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+              <Field label="Forma"><select value={compFiltros.forma} onChange={e=>setCompFiltros({...compFiltros,forma:e.target.value})}><option>Todas</option>{FORMAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+              <Field label="Natureza"><select value={compFiltros.natureza} onChange={e=>setCompFiltros({...compFiltros,natureza:e.target.value})}><option>Todas</option>{NATUREZAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+              <Field label="Categoria"><select value={compFiltros.categoria} onChange={e=>setCompFiltros({...compFiltros,categoria:e.target.value})}><option>Todas</option>{CATEGORIAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+              <Field label="Ordenação"><select value={compFiltros.ordenacao} onChange={e=>setCompFiltros({...compFiltros,ordenacao:e.target.value})}><option value="descricao">Descrição</option><option value="maior">Maior valor</option><option value="menor">Menor valor</option></select></Field>
+              <Field label="Buscar"><input placeholder="Buscar compromisso" value={compFiltros.busca} onChange={e=>setCompFiltros({...compFiltros,busca:e.target.value})}/></Field>
+              <button className="ghost" type="button" onClick={limparCompFiltros}>Limpar filtros</button>
+            </div>
+            <div className="summary-row"><span>{compromissosFiltrados.length} compromisso(s)</span><span>Selecionados: {compSelecionados.length}</span><button className="danger" type="button" onClick={excluirCompromissosSelecionados}>Excluir selecionados</button></div>
+            <div className="table-wrap"><table><thead><tr><th><input type="checkbox" checked={compromissosFiltrados.length>0 && compromissosFiltrados.every(c=>compSelecionados.includes(c.id))} onChange={toggleTodosCompromissos}/></th><th>Status</th><th>Descrição</th><th>Categoria</th><th>Conta</th><th>Forma</th><th>Natureza</th><th>Valor</th><th>Ações</th></tr></thead><tbody>
+            {compromissosFiltrados.map(c=><tr key={c.id} className={c.status!=='Previsto'?'muted-row':''}><td><input type="checkbox" checked={compSelecionados.includes(c.id)} onChange={()=>toggleCompSelecionado(c.id)}/></td><td>{c.status}</td><td>{c.descricao}</td><td>{c.categoria}</td><td><span className="bank-pill"><b className="dot" style={{background:getContaColor(c.conta)}}></b>{c.conta}</span></td><td>{c.forma}</td><td>{c.natureza}</td><td>{money(c.valor_previsto)}</td><td className="actions">{c.status==='Previsto'&&<button onClick={()=>confirmarCompromisso(c)}><CheckCircle2 size={15}/></button>}{c.status==='Previsto'&&<button onClick={()=>editarCompromisso(c)}><Edit3 size={15}/></button>}{c.status==='Previsto'&&<button onClick={()=>cancelarCompromisso(c)}><XCircle size={15}/></button>}<button className="danger" onClick={()=>excluirCompromisso(c.id)}><Trash2 size={14}/></button></td></tr>)}
+            {compromissosFiltrados.length===0&&<tr><td colSpan="9" className="empty">Nenhum compromisso encontrado com os filtros atuais.</td></tr>}
+          </tbody></table></div></section>
+
+          <section className="panel"><h2>Filtros dos lançamentos reais</h2><div className="filter-grid labeled">
+            <Field label="Data inicial"><input type="date" value={filtros.dataInicio} onChange={e=>setFiltros({...filtros,dataInicio:e.target.value})}/></Field>
+            <Field label="Data final"><input type="date" value={filtros.dataFim} onChange={e=>setFiltros({...filtros,dataFim:e.target.value})}/></Field>
+            <Field label="Tipo"><select value={filtros.tipo} onChange={e=>setFiltros({...filtros,tipo:e.target.value})}><option>Todos</option>{TIPOS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            <Field label="Instituição"><select value={filtros.conta} onChange={e=>setFiltros({...filtros,conta:e.target.value})}><option>Todas</option>{CONTAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            <Field label="Forma"><select value={filtros.forma} onChange={e=>setFiltros({...filtros,forma:e.target.value})}><option>Todas</option>{FORMAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            <Field label="Natureza"><select value={filtros.natureza} onChange={e=>setFiltros({...filtros,natureza:e.target.value})}><option>Todas</option>{NATUREZAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            <Field label="Categoria"><select value={filtros.categoria} onChange={e=>setFiltros({...filtros,categoria:e.target.value})}><option>Todas</option>{CATEGORIAS.map(x=><option key={x}>{x}</option>)}</select></Field>
+            <Field label="Ordenação"><select value={filtros.ordenacao} onChange={e=>setFiltros({...filtros,ordenacao:e.target.value})}><option value="recentes">Mais recentes</option><option value="antigos">Mais antigos</option><option value="maior">Maior valor</option><option value="menor">Menor valor</option></select></Field>
+            <Field label="Buscar"><input placeholder="Buscar descrição" value={filtros.busca} onChange={e=>setFiltros({...filtros,busca:e.target.value})}/></Field>
+            <button className="ghost" type="button" onClick={limparFiltros}>Limpar filtros</button>
+          </div><div className="summary-row"><span>{resumoFiltros.quantidade} lançamento(s)</span><span>Receitas: {money(resumoFiltros.receitas)}</span><span>Despesas: {money(resumoFiltros.despesas)}</span><span>Investimentos: {money(resumoFiltros.investimentos)}</span><span>Faturas: {money(resumoFiltros.faturas)}</span><span>Selecionados: {transSelecionadas.length}</span><button className="danger" type="button" onClick={excluirTransacoesSelecionadas}>Excluir selecionados</button></div></section>
+          <section className="panel"><h2>Lançamentos reais do ciclo</h2><div className="table-wrap"><table><thead><tr><th><input type="checkbox" checked={transacoesFiltradas.length>0 && transacoesFiltradas.every(t=>transSelecionadas.includes(t.id))} onChange={toggleTodasTransacoes}/></th><th>Data</th><th>Tipo</th><th>Categoria</th><th>Conta</th><th>Forma</th><th>Natureza</th><th>Descrição</th><th>Valor</th><th>Ações</th></tr></thead><tbody>
+            {transacoesFiltradas.map(t=><tr key={t.id}><td><input type="checkbox" checked={transSelecionadas.includes(t.id)} onChange={()=>toggleTransSelecionada(t.id)}/></td><td>{formatBR(t.data)}</td><td>{t.tipo}</td><td>{t.categoria}</td><td><span className="bank-pill"><b className="dot" style={{background:getContaColor(t.conta)}}></b>{t.conta}</span></td><td>{t.forma}</td><td>{t.natureza}</td><td>{t.descricao}</td><td>{money(t.valor)}</td><td className="actions"><button title="Editar" onClick={()=>editarTransacao(t)}><Edit3 size={14}/></button><button title="Duplicar" onClick={()=>duplicarTransacao(t)}><Copy size={14}/></button><button className="danger" title="Excluir" onClick={()=>excluir(t.id)}><Trash2 size={14}/></button></td></tr>)}
+            {transacoesFiltradas.length===0&&<tr><td colSpan="10" className="empty">Nenhum lançamento encontrado com os filtros atuais.</td></tr>}
+          </tbody></table></div></section>
+        </>}
       </>}
 
       {tab==='planejamento' && <>
@@ -869,10 +909,12 @@ function App(){
         <section className="layout">
           <div className="panel"><h2>Referências automáticas</h2><div className="simple-list">
             <div><span>Próximo ciclo</span><b>{formatBR(planejamentoCalc.proximo.start)} até {formatBR(planejamentoCalc.proximo.end)}</b></div>
-            <div><span>Compromissos no crédito cadastrados</span><b>{money(planejamentoCalc.compromissosCredito)}</b></div>
+            <div><span>Crédito utilizado no ciclo atual</span><b>{money(planejamentoCalc.creditoUtilizadoAtual)}</b></div>
+            <div><span>Crédito previsto ainda neste ciclo</span><b>{money(planejamentoCalc.compromissosCreditoCiclo)}</b></div>
+            <div><span>Referência para estimar fatura</span><b>{money(planejamentoCalc.referenciaFaturaCicloAtual)}</b></div>
             <div><span>Obrigações Débito/PIX automáticas</span><b>{money(planejamentoCalc.obrigacoesDebito)}</b></div>
-            <div><span>Fatura atual do ciclo</span><b>{money(dash.credito)}</b></div>
-          </div><div className="detail-list compact"><h3>Obrigações Débito/PIX consideradas</h3>{planejamentoCalc.obrigacoesDebitoLista.map(c=><div key={c.id}><span>{c.descricao} • {c.categoria}</span><b>{money(c.valor_previsto)}</b></div>)}{planejamentoCalc.obrigacoesDebitoLista.length===0&&<p className="chart-note">Nenhuma obrigação Débito/PIX prevista para o próximo ciclo.</p>}</div><p className="chart-note">A fatura estimada continua manual. As obrigações Débito/PIX são puxadas automaticamente dos compromissos previstos do próximo ciclo.</p></div>
+            
+          </div><div className="detail-list compact"><h3>Obrigações Débito/PIX consideradas</h3>{planejamentoCalc.obrigacoesDebitoLista.map(c=><div key={c.id}><span>{c.descricao} • {c.categoria}</span><b>{money(c.valor_previsto)}</b></div>)}{planejamentoCalc.obrigacoesDebitoLista.length===0&&<p className="chart-note">Nenhuma obrigação Débito/PIX prevista para o próximo ciclo.</p>}</div><div className="detail-list compact"><h3>Crédito previsto ainda neste ciclo</h3>{planejamentoCalc.compromissosCreditoCicloLista.map(c=><div key={c.id}><span>{c.descricao} • {c.categoria}</span><b>{money(c.valor_previsto)}</b></div>)}{planejamentoCalc.compromissosCreditoCicloLista.length===0&&<p className="chart-note">Nenhum compromisso no crédito previsto para este ciclo.</p>}</div><p className="chart-note">A fatura estimada continua manual. Use a referência de crédito atual + compromissos no crédito ainda previstos para estimar a próxima fatura. As obrigações Débito/PIX são puxadas automaticamente do próximo ciclo.</p></div>
           <div className="panel"><h2>Leitura rápida</h2><p className="chart-note">Se a necessidade de resgate for zero e houver aporte extra, o ciclo está excelente. Se houver resgate necessário, o sistema indica quanto precisaria sair da XP para manter caixa e aporte mínimos.</p></div>
         </section>
       </>}

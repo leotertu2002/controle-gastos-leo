@@ -1,11 +1,13 @@
-# Leo Finance v1.2.7
+# Leo Finance v1.2.8
+
+Atualização de organização da aba Lançamentos e Planejamento.
 
 Inclui:
-- Planejamento com obrigações Débito/PIX automáticas do próximo ciclo.
-- Fatura estimada continua manual.
-- Remoção do card de recomendações do Dashboard.
-- Gestão de compromissos na aba Lançamentos.
-- Agrupamento de recorrências, parcelamentos e compromissos parecidos.
-- Edição de grupo, exclusão de grupo e limpeza de duplicados.
+- Aba Lançamentos reorganizada em cards de ação.
+- Novo lançamento real separado de novo compromisso futuro.
+- Gestão de compromissos futuros separada em Assinaturas, Compras parceladas e Compromissos únicos.
+- Cards para grupos de compromissos com ações de editar, limpar duplicados, excluir grupo e ver ocorrências.
+- Planejamento com referência de fatura mais clara: crédito usado no ciclo atual + crédito previsto ainda no ciclo.
+- Obrigações Débito/PIX do próximo ciclo mantidas automaticamente.
 
-Não exige SQL novo.
+Não requer SQL novo.
