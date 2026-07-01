@@ -506,7 +506,12 @@ function App(){
 
   const totalAnalise=useMemo(()=>analiseTransacoes.reduce((s,t)=>s+Number(t.valor),0),[analiseTransacoes])
   const maiorGastoAnalise=useMemo(()=>analiseTransacoes.reduce((m,t)=>Number(t.valor)>Number(m?.valor||0)?t:m,null),[analiseTransacoes])
-  const mediaDiariaAnalise=useMemo(()=>totalAnalise/diffDaysInclusive(inicioCiclo,fimCiclo),[totalAnalise,inicioCiclo,fimCiclo])
+  const mediaDiariaAnalise=useMemo(()=>{
+    const hoje=isoToday()
+    const ref=hoje<inicioCiclo?inicioCiclo:hoje>fimCiclo?fimCiclo:hoje
+    const diasPassados=diffDaysInclusive(inicioCiclo,ref)
+    return totalAnalise/Math.max(1,diasPassados)
+  },[totalAnalise,inicioCiclo,fimCiclo])
 
   const porCategoriaAnalise=useMemo(()=>{
     const map={}
