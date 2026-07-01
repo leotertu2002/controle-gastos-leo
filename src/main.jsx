@@ -92,6 +92,7 @@ function App(){
   const [tab,setTab]=useState('dashboard')
   const [transacoes,setTransacoes]=useState([])
   const [compromissos,setCompromissos]=useState([])
+  const [todosCompromissos,setTodosCompromissos]=useState([])
   const [inicioCiclo,setInicioCiclo]=useState(toIso(c0.start))
   const [fimCiclo,setFimCiclo]=useState(toIso(c0.end))
   const [metaAporte,setMetaAporte]=useState(Number(localStorage.getItem('metaAporteLeo')||600))
@@ -122,6 +123,7 @@ function App(){
   const [compFiltros,setCompFiltros]=useState(()=>safeJSON('leo_filtros_compromissos', emptyCompFiltros))
   const [compSelecionados,setCompSelecionados]=useState([])
   const [transSelecionadas,setTransSelecionadas]=useState([])
+  const [grupoAberto,setGrupoAberto]=useState(null)
   const [categoriaAberta,setCategoriaAberta]=useState(null)
   const [naturezaAberta,setNaturezaAberta]=useState(null)
   const [dashboardDetalhe,setDashboardDetalhe]=useState(null)
@@ -145,18 +147,26 @@ function App(){
   useEffect(()=>localStorage.setItem('leo_filtros_compromissos', JSON.stringify(compFiltros)), [compFiltros])
 
   async function carregar(){
-    const [{data:t,error:et},{data:c,error:ec}] = await Promise.all([
+    const [{data:t,error:et},{data:c,error:ec},{data:allC,error:eall}] = await Promise.all([
       supabase.from('transacoes').select('*').gte('data',inicioCiclo).lte('data',fimCiclo).order('data',{ascending:false}),
-      supabase.from('compromissos').select('*').eq('ciclo_inicio',inicioCiclo).eq('ciclo_fim',fimCiclo).order('created_at',{ascending:false})
+      supabase.from('compromissos').select('*').eq('ciclo_inicio',inicioCiclo).eq('ciclo_fim',fimCiclo).order('created_at',{ascending:false}),
+      supabase.from('compromissos').select('*').order('ciclo_inicio',{ascending:true})
     ])
-    if(et) alert(et.message); if(ec) alert(ec.message)
-    setTransacoes(t||[]); setCompromissos(c||[])
+    if(et) alert(et.message); if(ec) alert(ec.message); if(eall) alert(eall.message)
+    setTransacoes(t||[]); setCompromissos(c||[]); setTodosCompromissos(allC||[])
   }
 
   async function inserirCompromissos(rows){
     if(rows.length === 0) return
     const { error } = await supabase.from('compromissos').insert(rows)
     if(error) throw error
+  }
+
+  function descricaoBase(descricao){
+    return String(descricao || '')
+      .replace(/\s*\(\d+\/\d+\)\s*$/,'')
+      .replace(/\s*\(recorrente\)\s*$/i,'')
+      .trim()
   }
 
   function montarCompromissosFuturos({descricao, categoria, conta, forma, natureza, valorParcela, quantidade, inicioOffset=1, recorrente=false}){
@@ -412,23 +422,24 @@ function App(){
     const aporte=parseNumber(planejamento.aporteMinimo)
     const caixaDesejado=parseNumber(planejamento.caixaDesejado)
     const proximo=nextCycleFromStart(inicioCiclo,1)
-    const compromissosProximo=compromissos
+    const compromissosProximoLista=todosCompromissos
       .filter(c=>c.status==='Previsto' && c.ciclo_inicio===proximo.start && c.ciclo_fim===proximo.end)
-      .reduce((s,c)=>s+Number(c.valor_previsto),0)
-    const sobraAntesCaixa=receitas-fatura-compromissosProximo-aporte
+    const obrigacoesDebitoLista=compromissosProximoLista.filter(c=>c.forma==='Débito/PIX')
+    const compromissosCreditoLista=compromissosProximoLista.filter(c=>c.forma==='Crédito')
+    const obrigacoesDebito=obrigacoesDebitoLista.reduce((s,c)=>s+Number(c.valor_previsto),0)
+    const compromissosCredito=compromissosCreditoLista.reduce((s,c)=>s+Number(c.valor_previsto),0)
+    const totalObrigacoes=fatura+obrigacoesDebito
+    const sobraAntesCaixa=receitas-totalObrigacoes-aporte
     const resgateNecessario=Math.max(0,caixaDesejado-sobraAntesCaixa)
     const aporteExtra=Math.max(0,sobraAntesCaixa-caixaDesejado)
     const metaDiaria=caixaDesejado/diffDaysInclusive(proximo.start,proximo.end)
-    const compromissosCredito=compromissos
-      .filter(c=>c.status==='Previsto' && c.forma==='Crédito')
-      .reduce((s,c)=>s+Number(c.valor_previsto),0)
     let saude='Saudável'
     if(resgateNecessario>0) saude='Crítico'
     else if(aporteExtra>0) saude='Excelente'
     else if(sobraAntesCaixa>=caixaDesejado) saude='Saudável'
     else saude='Atenção'
-    return {receitas,fatura,aporte,caixaDesejado,proximo,compromissosProximo,sobraAntesCaixa,resgateNecessario,aporteExtra,metaDiaria,compromissosCredito,saude}
-  },[planejamento,compromissos,inicioCiclo])
+    return {receitas,fatura,aporte,caixaDesejado,proximo,obrigacoesDebito,obrigacoesDebitoLista,totalObrigacoes,sobraAntesCaixa,resgateNecessario,aporteExtra,metaDiaria,compromissosCredito,compromissosCreditoLista,saude}
+  },[planejamento,todosCompromissos,inicioCiclo])
 
 
   const transacoesFiltradas=useMemo(()=>{
@@ -532,6 +543,66 @@ function App(){
     return arr
   },[compromissos,compFiltros])
 
+
+  const gruposCompromissos=useMemo(()=>{
+    const map={}
+    todosCompromissos.filter(c=>c.status==='Previsto').forEach(c=>{
+      const base=descricaoBase(c.descricao)
+      const key=base.toLowerCase()
+      if(!map[key]) map[key]={key,base,items:[],valor:Number(c.valor_previsto||0),contas:new Set(),formas:new Set(),naturezas:new Set(),categorias:new Set()}
+      map[key].items.push(c)
+      map[key].contas.add(c.conta)
+      map[key].formas.add(c.forma)
+      map[key].naturezas.add(c.natureza)
+      map[key].categorias.add(c.categoria)
+    })
+    return Object.values(map).map(g=>{
+      const items=[...g.items].sort((a,b)=>String(a.ciclo_inicio).localeCompare(String(b.ciclo_inicio)))
+      const total=items.reduce((s,c)=>s+Number(c.valor_previsto||0),0)
+      const isParcelado=items.some(c=>/\(\d+\/\d+\)/.test(String(c.descricao||'')))
+      const isRecorrente=items.some(c=>/\(recorrente\)/i.test(String(c.descricao||'')))
+      return {...g,items,total,proximo:items[0],tipo:isParcelado?'Parcelado':isRecorrente?'Recorrente':'Compromisso',contas:[...g.contas],formas:[...g.formas],naturezas:[...g.naturezas],categorias:[...g.categorias]}
+    }).sort((a,b)=>String(a.base).localeCompare(String(b.base)))
+  },[todosCompromissos])
+
+  async function editarGrupoCompromissos(grupo){
+    const primeira=grupo.items[0]
+    if(!primeira) return
+    const categoria=prompt('Categoria para todos os compromissos do grupo:', primeira.categoria)
+    if(categoria===null) return
+    const conta=prompt('Instituição para todos os compromissos do grupo:', primeira.conta)
+    if(conta===null) return
+    const forma=prompt('Forma para todos os compromissos do grupo (Débito/PIX ou Crédito):', primeira.forma)
+    if(forma===null) return
+    const natureza=prompt('Natureza para todos os compromissos do grupo (Gastos Fixos ou Gastos Variáveis):', primeira.natureza)
+    if(natureza===null) return
+    const rawValor=prompt('Valor para todos os compromissos do grupo:', Number(primeira.valor_previsto).toFixed(2).replace('.',','))
+    if(rawValor===null) return
+    const valor=parseNumber(rawValor)
+    if(!valor || valor<=0) return alert('Valor inválido.')
+    const ids=grupo.items.map(c=>c.id)
+    const {error}=await supabase.from('compromissos').update({categoria,conta,forma,natureza,valor_previsto:valor}).in('id',ids)
+    if(error) alert(error.message); else carregar()
+  }
+
+  async function excluirGrupoCompromissos(grupo){
+    if(!confirm(`Excluir todos os ${grupo.items.length} compromissos de ${grupo.base}?`)) return
+    const {error}=await supabase.from('compromissos').delete().in('id',grupo.items.map(c=>c.id))
+    if(error) alert(error.message); else {setGrupoAberto(null); carregar()}
+  }
+
+  async function excluirDuplicadosGrupo(grupo){
+    const seen=new Set(); const deletar=[]
+    grupo.items.forEach(c=>{
+      const k=`${c.ciclo_inicio}|${Number(c.valor_previsto).toFixed(2)}|${c.forma}|${c.conta}`
+      if(seen.has(k)) deletar.push(c.id); else seen.add(k)
+    })
+    if(deletar.length===0) return alert('Não encontrei duplicados evidentes neste grupo.')
+    if(!confirm(`Excluir ${deletar.length} duplicado(s) mantendo uma ocorrência por ciclo/valor/conta?`)) return
+    const {error}=await supabase.from('compromissos').delete().in('id',deletar)
+    if(error) alert(error.message); else carregar()
+  }
+
   function limparFiltros(){ setFiltros(emptyFiltros); setTransSelecionadas([]) }
   function limparCompFiltros(){ setCompFiltros(emptyCompFiltros); setCompSelecionados([]) }
   function toggleTransSelecionada(id){
@@ -589,7 +660,7 @@ function App(){
   function exportarBackupJSON(){
     const payload = {
       app:'Leo Finance',
-      version:'1.2.6',
+      version:'1.2.7',
       exported_at:new Date().toISOString(),
       ciclo:{inicio:inicioCiclo,fim:fimCiclo},
       meta_aporte:metaAporte,
@@ -683,7 +754,6 @@ function App(){
           {dashboardDetalhe==='investimentos' && renderListaDetalhe(investimentoDetalhe)}
         </section>}
         <section className="projection"><div><h2><TrendingUp size={19}/> Projeção do ciclo</h2><p>Média variável real: <b>{money(dash.mediaVariavelDia)}/dia</b>. Meta diária atual: <b>{money(dash.mediaPermitidaDia)}/dia</b>. Faltam <b>{dash.diasRestantes}</b> dias.</p><p className="chart-note">{dash.saldoProjetadoDescricao}</p></div><div className={dash.saldoProjetado>=0?'projection-number green':'projection-number red'}><span>Saldo projetado</span><strong>{money(dash.saldoProjetado)}</strong></div></section>
-        <section className="panel"><h2>Recomendações do ciclo</h2><div className="recommendations">{dash.recomendacoes.map((r,i)=><div key={i}>{r}</div>)}</div></section>
         <section className="layout">
           <div className="panel"><h2>Faturas por cartão</h2><div className="simple-list">{faturas.map((f,i)=><div key={f.conta}><span><b className="dot" style={{background:getContaColor(f.conta)}}></b>{f.conta}</span><b>{money(f.valor)}</b></div>)}</div></div>
           <div className="panel"><h2>Saldo por conta</h2><div className="simple-list">{saldoPorConta.map((s,i)=><div key={s.conta}><span><b className="dot" style={{background:getContaColor(s.conta)}}></b>{s.conta}</span><b className={s.valor>=0?'green':'red'}>{money(s.valor)}</b></div>)}</div><p className="chart-note">Considera apenas Receita Recebida e saídas em Débito/PIX.</p></div>
@@ -732,6 +802,29 @@ function App(){
           {compromissosFiltrados.map(c=><tr key={c.id} className={c.status!=='Previsto'?'muted-row':''}><td><input type="checkbox" checked={compSelecionados.includes(c.id)} onChange={()=>toggleCompSelecionado(c.id)}/></td><td>{c.status}</td><td>{c.descricao}</td><td>{c.categoria}</td><td><span className="bank-pill"><b className="dot" style={{background:getContaColor(c.conta)}}></b>{c.conta}</span></td><td>{c.forma}</td><td>{c.natureza}</td><td>{money(c.valor_previsto)}</td><td className="actions">{c.status==='Previsto'&&<button onClick={()=>confirmarCompromisso(c)}><CheckCircle2 size={15}/></button>}{c.status==='Previsto'&&<button onClick={()=>editarCompromisso(c)}><Edit3 size={15}/></button>}{c.status==='Previsto'&&<button onClick={()=>cancelarCompromisso(c)}><XCircle size={15}/></button>}<button className="danger" onClick={()=>excluirCompromisso(c.id)}><Trash2 size={14}/></button></td></tr>)}
           {compromissosFiltrados.length===0&&<tr><td colSpan="9" className="empty">Nenhum compromisso encontrado com os filtros atuais.</td></tr>}
         </tbody></table></div></section>
+
+        <section className="panel"><h2>Gestão de compromissos</h2>
+          <p className="chart-note">Agrupa parcelas, recorrências e compromissos parecidos para facilitar edição em lote, exclusão e limpeza de duplicados.</p>
+          <div className="commitment-groups">
+            {gruposCompromissos.map(g=><div key={g.key} className="commitment-group">
+              <div className="commitment-group-head">
+                <button className="group-title" type="button" onClick={()=>setGrupoAberto(grupoAberto===g.key?null:g.key)}>
+                  <ChevronDown size={16}/>
+                  <span><b>{g.base}</b><small>{g.tipo} • {g.items.length} ocorrência(s) futura(s) • {g.contas.join(', ')} • {g.formas.join(', ')}</small></span>
+                </button>
+                <strong>{money(g.total)}</strong>
+                <button className="mini-button" type="button" onClick={()=>editarGrupoCompromissos(g)}>Editar grupo</button>
+                <button className="mini-button" type="button" onClick={()=>excluirDuplicadosGrupo(g)}>Limpar duplicados</button>
+                <button className="danger" type="button" onClick={()=>excluirGrupoCompromissos(g)}>Excluir grupo</button>
+              </div>
+              {grupoAberto===g.key && <div className="detail-list compact group-details">
+                {g.items.map(c=><div key={c.id}><span>{formatBR(c.ciclo_inicio)} a {formatBR(c.ciclo_fim)} • {c.descricao} • {c.conta} • {c.forma}</span><b>{money(c.valor_previsto)}</b><button className="danger" type="button" onClick={()=>excluirCompromisso(c.id)}>Excluir</button></div>)}
+              </div>}
+            </div>)}
+            {gruposCompromissos.length===0&&<p className="chart-note">Nenhum compromisso futuro encontrado.</p>}
+          </div>
+        </section>
+
         <section className="panel"><h2>Filtros dos lançamentos</h2><div className="filter-grid labeled">
           <Field label="Data inicial"><input type="date" value={filtros.dataInicio} onChange={e=>setFiltros({...filtros,dataInicio:e.target.value})}/></Field>
           <Field label="Data final"><input type="date" value={filtros.dataFim} onChange={e=>setFiltros({...filtros,dataFim:e.target.value})}/></Field>
@@ -762,8 +855,9 @@ function App(){
           </div><p className="chart-note">A fatura estimada é manual. Compromissos no crédito cadastrados aparecem abaixo como referência, sem somar automaticamente.</p></div>
           <div className="panel"><h2>Resultado do planejamento</h2><div className="simple-list">
             <div><span>Receitas previstas</span><b>{money(planejamentoCalc.receitas)}</b></div>
-            <div><span>Fatura estimada</span><b>{money(planejamentoCalc.fatura)}</b></div>
-            <div><span>Compromissos do próximo ciclo</span><b>{money(planejamentoCalc.compromissosProximo)}</b></div>
+            <div><span>Fatura estimada manual</span><b>{money(planejamentoCalc.fatura)}</b></div>
+            <div><span>Obrigações Débito/PIX</span><b>{money(planejamentoCalc.obrigacoesDebito)}</b></div>
+            <div><span>Total de obrigações</span><b>{money(planejamentoCalc.totalObrigacoes)}</b></div>
             <div><span>Meta mínima de aporte</span><b>{money(planejamentoCalc.aporte)}</b></div>
             <div><span>Caixa desejado</span><b>{money(planejamentoCalc.caixaDesejado)}</b></div>
             <div><span>Necessidade de resgate</span><b className={planejamentoCalc.resgateNecessario>0?'red':'green'}>{money(planejamentoCalc.resgateNecessario)}</b></div>
@@ -776,8 +870,9 @@ function App(){
           <div className="panel"><h2>Referências automáticas</h2><div className="simple-list">
             <div><span>Próximo ciclo</span><b>{formatBR(planejamentoCalc.proximo.start)} até {formatBR(planejamentoCalc.proximo.end)}</b></div>
             <div><span>Compromissos no crédito cadastrados</span><b>{money(planejamentoCalc.compromissosCredito)}</b></div>
+            <div><span>Obrigações Débito/PIX automáticas</span><b>{money(planejamentoCalc.obrigacoesDebito)}</b></div>
             <div><span>Fatura atual do ciclo</span><b>{money(dash.credito)}</b></div>
-          </div><p className="chart-note">Use esses valores apenas como referência para preencher a fatura estimada manual.</p></div>
+          </div><div className="detail-list compact"><h3>Obrigações Débito/PIX consideradas</h3>{planejamentoCalc.obrigacoesDebitoLista.map(c=><div key={c.id}><span>{c.descricao} • {c.categoria}</span><b>{money(c.valor_previsto)}</b></div>)}{planejamentoCalc.obrigacoesDebitoLista.length===0&&<p className="chart-note">Nenhuma obrigação Débito/PIX prevista para o próximo ciclo.</p>}</div><p className="chart-note">A fatura estimada continua manual. As obrigações Débito/PIX são puxadas automaticamente dos compromissos previstos do próximo ciclo.</p></div>
           <div className="panel"><h2>Leitura rápida</h2><p className="chart-note">Se a necessidade de resgate for zero e houver aporte extra, o ciclo está excelente. Se houver resgate necessário, o sistema indica quanto precisaria sair da XP para manter caixa e aporte mínimos.</p></div>
         </section>
       </>}

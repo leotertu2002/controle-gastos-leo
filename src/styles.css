@@ -27,3 +27,14 @@ input[type="checkbox"]{width:16px;height:16px;accent-color:#6366f1}
 main{margin-left:76px}
 @media(max-width:950px){.sidebar{width:100%;height:64px;right:0;bottom:auto;flex-direction:row;padding:8px 10px;border-right:0;border-bottom:1px solid #26304d}.sidebar-logo{width:42px;height:42px;margin:0 8px 0 0}.sidebar-nav{flex-direction:row;gap:8px;justify-content:center}.sidebar button{width:42px;height:42px;border-radius:13px}.sidebar-logout{margin-top:0!important;margin-left:8px!important}.sidebar-tooltip{display:none}.topbar{margin-left:0;margin-top:64px;padding-left:18px}main{margin-left:0}.toolbar{margin-top:0}}
 .field-label{display:flex;flex-direction:column;gap:6px;color:#aab4d4;font-size:12px;font-weight:700;letter-spacing:.01em}.field-label input,.field-label select{width:100%}.filter-grid.labeled{align-items:end}.filter-grid.labeled .ghost,.filter-grid.labeled .danger{align-self:end;min-height:44px}
+
+
+.commitment-groups{display:grid;gap:12px}
+.commitment-group{background:#151c31;border:1px solid #273150;border-radius:14px;padding:12px}
+.commitment-group-head{display:grid;grid-template-columns:minmax(240px,1fr) auto auto auto auto;gap:10px;align-items:center}
+.group-title{display:flex;align-items:center;gap:10px;text-align:left;background:transparent;color:#eef2ff;padding:0}
+.group-title span{display:grid;gap:4px}
+.group-title small{color:#aab4d4;font-size:12px;font-weight:400}
+.group-details{margin-top:12px}
+.group-details div{grid-template-columns:minmax(250px,1fr) auto auto}
+@media(max-width:950px){.commitment-group-head{grid-template-columns:1fr}.group-details div{grid-template-columns:1fr}}
