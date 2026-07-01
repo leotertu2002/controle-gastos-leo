@@ -131,6 +131,7 @@ function App(){
   const [resultadoAberto,setResultadoAberto]=useState(false)
   const [lancamentoPainel,setLancamentoPainel]=useState('real')
   const [gestaoTipo,setGestaoTipo]=useState('assinaturas')
+  const [analiseModo,setAnaliseModo]=useState('variaveis')
 
   useEffect(()=>{
     supabase.auth.getSession().then(({data})=>{setSession(data.session);setLoading(false)})
@@ -479,12 +480,61 @@ function App(){
     }
   },[transacoesFiltradas])
 
+  const analiseTransacoes=useMemo(()=>{
+    return transacoes.filter(t=>{
+      if(t.tipo!=='Despesa') return false
+      if(analiseModo==='variaveis') return t.natureza==='Gastos Variáveis'
+      if(analiseModo==='fixos') return t.natureza==='Gastos Fixos'
+      return true
+    })
+  },[transacoes,analiseModo])
+
+  const analiseInfo=useMemo(()=>{
+    if(analiseModo==='variaveis') return {
+      titulo:'Gastos variáveis',
+      descricao:'Análise somente das despesas variáveis, ideal para entender comportamento e consumo do dia a dia.'
+    }
+    if(analiseModo==='fixos') return {
+      titulo:'Gastos fixos',
+      descricao:'Análise somente das despesas fixas, ideal para entender quanto do ciclo já nasce comprometido.'
+    }
+    return {
+      titulo:'Gastos totais',
+      descricao:'Visão consolidada de todas as despesas do ciclo, somando fixos e variáveis.'
+    }
+  },[analiseModo])
+
+  const totalAnalise=useMemo(()=>analiseTransacoes.reduce((s,t)=>s+Number(t.valor),0),[analiseTransacoes])
+  const maiorGastoAnalise=useMemo(()=>analiseTransacoes.reduce((m,t)=>Number(t.valor)>Number(m?.valor||0)?t:m,null),[analiseTransacoes])
+  const mediaDiariaAnalise=useMemo(()=>totalAnalise/diffDaysInclusive(inicioCiclo,fimCiclo),[totalAnalise,inicioCiclo,fimCiclo])
+
+  const porCategoriaAnalise=useMemo(()=>{
+    const map={}
+    analiseTransacoes.forEach(t=>map[t.categoria]=(map[t.categoria]||0)+Number(t.valor))
+    return Object.entries(map).map(([categoria,valor])=>({categoria,valor})).sort((a,b)=>b.valor-a.valor)
+  },[analiseTransacoes])
+
+  const porContaAnalise=useMemo(()=>{
+    return CONTAS.map(conta=>({conta, valor:analiseTransacoes.filter(t=>t.conta===conta).reduce((s,t)=>s+Number(t.valor),0)}))
+  },[analiseTransacoes])
+
+  const porDiaAnalise=useMemo(()=>{
+    const map={}
+    analiseTransacoes.forEach(t=>{map[t.data]=(map[t.data]||0)+Number(t.valor)})
+    return Object.entries(map).map(([data,valor])=>({data, dia:data.slice(8,10)+'/'+data.slice(5,7), valor})).sort((a,b)=>a.data.localeCompare(b.data))
+  },[analiseTransacoes])
+
+  const fixosVariaveisAnalise=useMemo(()=>{
+    const fixos = transacoes.filter(t=>t.tipo==='Despesa' && t.natureza==='Gastos Fixos').reduce((s,t)=>s+Number(t.valor),0)
+    const variaveis = transacoes.filter(t=>t.tipo==='Despesa' && t.natureza==='Gastos Variáveis').reduce((s,t)=>s+Number(t.valor),0)
+    return [{natureza:'Gastos Fixos', valor:fixos},{natureza:'Gastos Variáveis', valor:variaveis}]
+  },[transacoes])
+
   const calendarioCiclo=useMemo(()=>{
     const cells=[]
     const inicio=new Date(inicioCiclo+'T00:00:00')
     const fim=new Date(fimCiclo+'T00:00:00')
-    const primeiroDiaSemana=inicio.getDay() // 0 domingo, 1 segunda...
-    const ordemVisual=[0,1,2,3,4,5,6] // Dom, Seg, Ter, Qua, Qui, Sex, Sáb
+    const primeiroDiaSemana=inicio.getDay()
 
     for(let i=0;i<primeiroDiaSemana;i++){
       cells.push({blank:true, key:`blank-${i}`})
@@ -492,7 +542,7 @@ function App(){
 
     for(let d=new Date(inicio); d<=fim; d.setDate(d.getDate()+1)){
       const iso=toIso(new Date(d))
-      const gastosDoDia=transacoes.filter(t=>t.data===iso && t.tipo==='Despesa' && t.natureza==='Gastos Variáveis')
+      const gastosDoDia=analiseTransacoes.filter(t=>t.data===iso)
       const total=gastosDoDia.reduce((s,t)=>s+Number(t.valor),0)
       const maior=gastosDoDia.reduce((m,t)=>Number(t.valor)>Number(m?.valor||0)?t:m,null)
       let nivel='cal-neutral'
@@ -511,14 +561,14 @@ function App(){
       })
     }
     return cells
-  },[transacoes,inicioCiclo,fimCiclo])
+  },[analiseTransacoes,inicioCiclo,fimCiclo])
 
   const detalhesCategoriaSelecionada=useMemo(()=>{
     if(!categoriaAberta) return []
-    return transacoes
-      .filter(t=>t.tipo==='Despesa' && t.categoria===categoriaAberta)
+    return analiseTransacoes
+      .filter(t=>t.categoria===categoriaAberta)
       .sort((a,b)=>Number(b.valor)-Number(a.valor))
-  },[transacoes,categoriaAberta])
+  },[analiseTransacoes,categoriaAberta])
 
   const detalhesNaturezaSelecionada=useMemo(()=>{
     if(!naturezaAberta) return []
@@ -920,25 +970,45 @@ function App(){
       </>}
 
       {tab==='analises' && <>
-        <section className="panel"><h2>Calendário do ciclo</h2>
+        <section className="panel">
+          <h2>Análises do ciclo</h2>
+          <div className="analysis-tabs">
+            <button className={analiseModo==='variaveis'?'active':''} onClick={()=>{setAnaliseModo('variaveis');setCategoriaAberta(null);setNaturezaAberta(null)}}>Variáveis</button>
+            <button className={analiseModo==='fixos'?'active':''} onClick={()=>{setAnaliseModo('fixos');setCategoriaAberta(null);setNaturezaAberta(null)}}>Fixos</button>
+            <button className={analiseModo==='total'?'active':''} onClick={()=>{setAnaliseModo('total');setCategoriaAberta(null);setNaturezaAberta(null)}}>Total</button>
+          </div>
+          <p className="chart-note">{analiseInfo.descricao}</p>
+        </section>
+
+        <section className="cards compact-cards">
+          <div className="card"><span>Total analisado</span><strong>{money(totalAnalise)}</strong></div>
+          <div className="card"><span>Lançamentos</span><strong>{analiseTransacoes.length}</strong></div>
+          <div className="card"><span>Média diária</span><strong>{money(mediaDiariaAnalise)}</strong></div>
+          <div className="card"><span>Maior gasto</span><strong>{maiorGastoAnalise?money(maiorGastoAnalise.valor):money(0)}</strong><small>{maiorGastoAnalise?.descricao || 'Sem gasto no filtro'}</small></div>
+        </section>
+
+        <section className="panel"><h2>Calendário — {analiseInfo.titulo}</h2>
           <div className="calendar-weekdays"><span>Dom</span><span>Seg</span><span>Ter</span><span>Qua</span><span>Qui</span><span>Sex</span><span>Sáb</span></div>
           <div className="calendar-grid">
           {calendarioCiclo.map(d=>d.blank
             ? <div key={d.key} className="calendar-day calendar-blank"></div>
-            : <div key={d.key} className={`calendar-day ${d.nivel}`} title={`${formatBR(d.data)} (${d.semana}) • Gastos variáveis: ${money(d.total)} • ${d.quantidade} lançamento(s)${d.maior ? ` • Maior gasto: ${d.maior.descricao} - ${money(d.maior.valor)}` : ''}`}><strong>{d.dia}</strong><small>{d.semana}</small><span>{money(d.total)}</span></div>
+            : <div key={d.key} className={`calendar-day ${d.nivel}`} title={`${formatBR(d.data)} (${d.semana}) • ${analiseInfo.titulo}: ${money(d.total)} • ${d.quantidade} lançamento(s)${d.maior ? ` • Maior gasto: ${d.maior.descricao} - ${money(d.maior.valor)}` : ''}`}><strong>{d.dia}</strong><small>{d.semana}</small><span>{money(d.total)}</span></div>
           )}
-        </div><p className="chart-note">Cores por gasto variável diário: acima de R$ 50, R$ 100 e R$ 200. O total considera apenas despesas reais marcadas como Gastos Variáveis.</p></section>
+        </div><p className="chart-note">Cores por gasto diário da visão selecionada: acima de R$ 50, R$ 100 e R$ 200.</p></section>
+
         <section className="layout">
-          <div className="panel"><h2>Gastos reais por categoria</h2><div className="chart"><ResponsiveContainer width="100%" height={280}><PieChart><Pie data={porCategoria} dataKey="valor" nameKey="categoria" outerRadius={100} label={false}>{porCategoria.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}</Pie><Tooltip formatter={(v,n)=>[money(v), `${n} • ${pct(v,dash.receitaTotal)}`]}/></PieChart></ResponsiveContainer></div><p className="chart-note">Passe o mouse sobre o gráfico para ver valores. A legenda detalhada fica no resumo por categoria.</p></div>
-          <div className="panel"><h2>Gastos variáveis por dia</h2><div className="chart"><ResponsiveContainer width="100%" height={280}><LineChart data={porDiaVariavel}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="dia"/><YAxis/><Tooltip formatter={(v)=>money(v)}/><Line type="monotone" dataKey="valor" strokeWidth={3} dot stroke="#60a5fa"/></LineChart></ResponsiveContainer></div></div>
+          <div className="panel"><h2>{analiseInfo.titulo} por categoria</h2><div className="chart"><ResponsiveContainer width="100%" height={280}><PieChart><Pie data={porCategoriaAnalise} dataKey="valor" nameKey="categoria" outerRadius={100} label={false}>{porCategoriaAnalise.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}</Pie><Tooltip formatter={(v,n)=>[money(v), `${n} • ${pct(v,dash.receitaTotal)}`]}/></PieChart></ResponsiveContainer></div><p className="chart-note">Considera apenas a visão selecionada: {analiseInfo.titulo.toLowerCase()}.</p></div>
+          <div className="panel"><h2>{analiseInfo.titulo} por dia</h2><div className="chart"><ResponsiveContainer width="100%" height={280}><LineChart data={porDiaAnalise}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="dia"/><YAxis/><Tooltip formatter={(v)=>money(v)}/><Line type="monotone" dataKey="valor" strokeWidth={3} dot stroke="#60a5fa"/></LineChart></ResponsiveContainer></div></div>
         </section>
+
         <section className="layout">
-          <div className="panel"><h2>Gastos reais por conta</h2><div className="chart"><ResponsiveContainer width="100%" height={240}><BarChart data={porConta}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="conta"/><YAxis/><Tooltip formatter={(v)=>money(v)}/><Bar dataKey="valor" radius={[8,8,0,0]}>{porConta.map((item)=><Cell key={item.conta} fill={getContaColor(item.conta)}/>)}</Bar></BarChart></ResponsiveContainer></div></div>
-          <div className="panel"><h2>Gastos fixos x variáveis</h2><div className="chart"><ResponsiveContainer width="100%" height={240}><BarChart data={fixosVariaveis}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="natureza"/><YAxis/><Tooltip formatter={(v)=>money(v)}/><Bar dataKey="valor" radius={[8,8,0,0]}>{fixosVariaveis.map((_,i)=><Cell key={i} fill={COLORS[i+4]}/>)}</Bar></BarChart></ResponsiveContainer></div></div>
+          <div className="panel"><h2>{analiseInfo.titulo} por instituição</h2><div className="chart"><ResponsiveContainer width="100%" height={240}><BarChart data={porContaAnalise}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="conta"/><YAxis/><Tooltip formatter={(v)=>money(v)}/><Bar dataKey="valor" radius={[8,8,0,0]}>{porContaAnalise.map((item)=><Cell key={item.conta} fill={getContaColor(item.conta)}/>)}</Bar></BarChart></ResponsiveContainer></div></div>
+          <div className="panel"><h2>Resumo fixos x variáveis</h2><div className="chart"><ResponsiveContainer width="100%" height={240}><BarChart data={fixosVariaveisAnalise}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="natureza"/><YAxis/><Tooltip formatter={(v)=>money(v)}/><Bar dataKey="valor" radius={[8,8,0,0]}>{fixosVariaveisAnalise.map((_,i)=><Cell key={i} fill={COLORS[i+4]}/>)}</Bar></BarChart></ResponsiveContainer></div><p className="chart-note">Comparativo geral do ciclo, independentemente da sub-aba selecionada.</p></div>
         </section>
+
         <section className="layout">
-          <div className="panel"><h2>Resumo por categoria</h2><div className="simple-list">{porCategoria.map((c,i)=><div key={c.categoria}><span><b className="dot" style={{background:COLORS[i%COLORS.length]}}></b>{c.categoria}</span><b>{money(c.valor)} • {pct(c.valor,dash.receitaTotal)}</b><button className="mini-button" onClick={()=>setCategoriaAberta(categoriaAberta===c.categoria?null:c.categoria)}>{categoriaAberta===c.categoria?'Fechar':'Ver gastos'}</button></div>)}</div>{categoriaAberta&&<div className="detail-list"><h3>{categoriaAberta} — do maior para o menor</h3>{detalhesCategoriaSelecionada.map(t=><div key={t.id}><span>{formatBR(t.data)} • {t.descricao}</span><b>{money(t.valor)}</b></div>)}{detalhesCategoriaSelecionada.length===0&&<p className="chart-note">Nenhum gasto encontrado.</p>}</div>}</div>
-          <div className="panel"><h2>Resumo fixos x variáveis</h2><div className="simple-list">{fixosVariaveis.map((n,i)=><div key={n.natureza}><span><b className="dot" style={{background:COLORS[i+4]}}></b>{n.natureza}</span><b>{money(n.valor)} • {pct(n.valor,dash.receitaTotal)}</b><button className="mini-button" onClick={()=>setNaturezaAberta(naturezaAberta===n.natureza?null:n.natureza)}>{naturezaAberta===n.natureza?'Fechar':'Ver gastos'}</button></div>)}</div>{naturezaAberta&&<div className="detail-list"><h3>{naturezaAberta} — do maior para o menor</h3>{detalhesNaturezaSelecionada.map(t=><div key={t.id}><span>{formatBR(t.data)} • {t.categoria} • {t.descricao}</span><b>{money(t.valor)}</b></div>)}{detalhesNaturezaSelecionada.length===0&&<p className="chart-note">Nenhum gasto encontrado.</p>}</div>}</div>
+          <div className="panel"><h2>Resumo por categoria — {analiseInfo.titulo}</h2><div className="simple-list">{porCategoriaAnalise.map((c,i)=><div key={c.categoria}><span><b className="dot" style={{background:COLORS[i%COLORS.length]}}></b>{c.categoria}</span><b>{money(c.valor)} • {pct(c.valor,dash.receitaTotal)}</b><button className="mini-button" onClick={()=>setCategoriaAberta(categoriaAberta===c.categoria?null:c.categoria)}>{categoriaAberta===c.categoria?'Fechar':'Ver gastos'}</button></div>)}</div>{categoriaAberta&&<div className="detail-list"><h3>{categoriaAberta} — do maior para o menor</h3>{detalhesCategoriaSelecionada.map(t=><div key={t.id}><span>{formatBR(t.data)} • {t.natureza} • {t.descricao}</span><b>{money(t.valor)}</b></div>)}{detalhesCategoriaSelecionada.length===0&&<p className="chart-note">Nenhum gasto encontrado.</p>}</div>}</div>
+          <div className="panel"><h2>Detalhes fixos x variáveis</h2><div className="simple-list">{fixosVariaveisAnalise.map((n,i)=><div key={n.natureza}><span><b className="dot" style={{background:COLORS[i+4]}}></b>{n.natureza}</span><b>{money(n.valor)} • {pct(n.valor,dash.receitaTotal)}</b><button className="mini-button" onClick={()=>setNaturezaAberta(naturezaAberta===n.natureza?null:n.natureza)}>{naturezaAberta===n.natureza?'Fechar':'Ver gastos'}</button></div>)}</div>{naturezaAberta&&<div className="detail-list"><h3>{naturezaAberta} — do maior para o menor</h3>{detalhesNaturezaSelecionada.map(t=><div key={t.id}><span>{formatBR(t.data)} • {t.categoria} • {t.descricao}</span><b>{money(t.valor)}</b></div>)}{detalhesNaturezaSelecionada.length===0&&<p className="chart-note">Nenhum gasto encontrado.</p>}</div>}</div>
         </section>
       </>}
 
