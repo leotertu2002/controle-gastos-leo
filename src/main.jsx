@@ -363,7 +363,7 @@ function App(){
     const investimentos=soma(transacoes.filter(t=>t.tipo==='Investimento'))
     const pagamentosFatura=soma(transacoes.filter(t=>t.tipo==='Pagamento Fatura'))
     const gastosVariaveis=soma(transacoes.filter(t=>t.tipo==='Despesa'&&t.natureza==='Gastos Variáveis'))
-    const credito=soma(transacoes.filter(t=>t.forma==='Crédito'&&['Despesa','Investimento'].includes(t.tipo)))
+    const credito=soma(transacoes.filter(t=>t.forma==='Crédito'&&t.tipo==='Despesa'))
     const caixaDisponivel=saldoPorConta.reduce((s,v)=>s+Number(v.valor),0)
     const compromissosPrevistos=compromissos.filter(c=>c.status==='Previsto').reduce((s,c)=>s+Number(c.valor_previsto),0)
     const reservaAporte=Math.max(0,metaAporte-investimentos)
@@ -372,7 +372,7 @@ function App(){
     const ref=hoje<inicioCiclo?inicioCiclo:hoje>fimCiclo?fimCiclo:hoje
     const diasPassados=diffDaysInclusive(inicioCiclo,ref)
     const diasTotal=diffDaysInclusive(inicioCiclo,fimCiclo)
-    const diasRestantes=Math.max(0,diasTotal-diasPassados)
+    const diasRestantes=Math.max(1,diasTotal-diasPassados+1)
     const mediaVariavelDia=gastosVariaveis/Math.max(1,diasPassados)
     const mediaPermitidaDia=diasRestantes>0 ? Math.max(0, caixaDisponivel)/diasRestantes : Math.max(0, caixaDisponivel)
     const projecaoVariavelRestante=mediaVariavelDia*diasRestantes
@@ -709,7 +709,7 @@ function App(){
   const receitasRecebidasDetalhe = useMemo(()=>transacoes.filter(t=>t.tipo==='Receita Recebida').sort((a,b)=>b.data.localeCompare(a.data)),[transacoes])
   const receitasPrevistasDetalhe = useMemo(()=>transacoes.filter(t=>t.tipo==='Receita Prevista').sort((a,b)=>b.data.localeCompare(a.data)),[transacoes])
   const creditoDetalhe = useMemo(()=>transacoes.filter(t=>t.tipo==='Despesa' && t.forma==='Crédito').sort((a,b)=>Number(b.valor)-Number(a.valor)),[transacoes])
-  const caixaDetalhe = useMemo(()=>transacoes.filter(t=>t.forma==='Débito/PIX' || t.tipo==='Receita Recebida').sort((a,b)=>b.data.localeCompare(a.data)),[transacoes])
+  const caixaDetalhe = useMemo(()=>transacoes.filter(t=>t.tipo==='Receita Recebida' || (t.forma==='Débito/PIX' && ['Despesa','Investimento','Pagamento Fatura'].includes(t.tipo))).sort((a,b)=>b.data.localeCompare(a.data)),[transacoes])
   const investimentoDetalhe = useMemo(()=>transacoes.filter(t=>t.tipo==='Investimento').sort((a,b)=>b.data.localeCompare(a.data)),[transacoes])
   const compromissosPrevistosDetalhe = useMemo(()=>compromissos.filter(c=>c.status==='Previsto').sort((a,b)=>Number(b.valor_previsto)-Number(a.valor_previsto)),[compromissos])
 
@@ -809,19 +809,19 @@ function App(){
         </section>
         <section className="cards">
           <div className={`card clickable-card ${dashboardDetalhe==='compromissos'?'selected':''}`} onClick={()=>setDashboardDetalhe(dashboardDetalhe==='compromissos'?null:'compromissos')}><span>Compromissos previstos</span><strong>{money(dash.compromissosPrevistos)}</strong><small>Clique para ver detalhes</small></div>
-          <div className="card"><span>Dias restantes</span><strong>{dash.diasRestantes}</strong><small>Até {formatBR(fimCiclo)}</small></div>
+          <div className="card"><span>Dias disponíveis</span><strong>{dash.diasRestantes}</strong><small>Incluindo hoje, até {formatBR(fimCiclo)}</small></div>
           <div className="card"><span>Situação do ciclo</span><strong className={dash.situacao==='Crítico'?'red':dash.situacao==='Atenção'?'':'green'}>{dash.situacao}</strong><small>{dash.situacaoDescricao}</small></div>
           <div className={`card clickable-card ${dashboardDetalhe==='investimentos'?'selected':''}`} onClick={()=>setDashboardDetalhe(dashboardDetalhe==='investimentos'?null:'investimentos')}><span>Investido no ciclo</span><strong>{money(dash.investimentos)}</strong><small>Reserva aporte: {money(dash.reservaAporte)}</small></div>
         </section>
         {dashboardDetalhe && <section className="panel dashboard-detail"><h2><ChevronDown size={18}/> Detalhes do card</h2>
-          {dashboardDetalhe==='caixa' && <><p className="chart-note">Movimentos em Débito/PIX e receitas recebidas que explicam o caixa disponível do ciclo.</p>{renderListaDetalhe(caixaDetalhe)}</>}
+          {dashboardDetalhe==='caixa' && <><p className="chart-note">Resumo do caixa: receitas recebidas e saídas em Débito/PIX (despesas, investimentos e pagamentos de fatura).</p>{renderListaDetalhe(caixaDetalhe)}</>}
           {dashboardDetalhe==='receitaRecebida' && renderListaDetalhe(receitasRecebidasDetalhe)}
           {dashboardDetalhe==='receitaPrevista' && renderListaDetalhe(receitasPrevistasDetalhe)}
           {dashboardDetalhe==='credito' && renderListaDetalhe(creditoDetalhe)}
           {dashboardDetalhe==='compromissos' && renderListaDetalhe(compromissosPrevistosDetalhe,'compromisso')}
           {dashboardDetalhe==='investimentos' && renderListaDetalhe(investimentoDetalhe)}
         </section>}
-        <section className="projection"><div><h2><TrendingUp size={19}/> Projeção do ciclo</h2><p>Média variável real: <b>{money(dash.mediaVariavelDia)}/dia</b>. Meta diária atual: <b>{money(dash.mediaPermitidaDia)}/dia</b>. Faltam <b>{dash.diasRestantes}</b> dias.</p><p className="chart-note">{dash.saldoProjetadoDescricao}</p></div><div className={dash.saldoProjetado>=0?'projection-number green':'projection-number red'}><span>Saldo projetado</span><strong>{money(dash.saldoProjetado)}</strong></div></section>
+        <section className="projection"><div><h2><TrendingUp size={19}/> Projeção do ciclo</h2><p>Média variável real: <b>{money(dash.mediaVariavelDia)}/dia</b>. Meta diária atual: <b>{money(dash.mediaPermitidaDia)}/dia</b>. Restam <b>{dash.diasRestantes}</b> dias disponíveis, incluindo hoje.</p><p className="chart-note">{dash.saldoProjetadoDescricao}</p></div><div className={dash.saldoProjetado>=0?'projection-number green':'projection-number red'}><span>Saldo projetado</span><strong>{money(dash.saldoProjetado)}</strong></div></section>
         <section className="layout">
           <div className="panel"><h2>Faturas por cartão</h2><div className="simple-list">{faturas.map((f,i)=><div key={f.conta}><span><b className="dot" style={{background:getContaColor(f.conta)}}></b>{f.conta}</span><b>{money(f.valor)}</b></div>)}</div></div>
           <div className="panel"><h2>Saldo por conta</h2><div className="simple-list">{saldoPorConta.map((s,i)=><div key={s.conta}><span><b className="dot" style={{background:getContaColor(s.conta)}}></b>{s.conta}</span><b className={s.valor>=0?'green':'red'}>{money(s.valor)}</b></div>)}</div><p className="chart-note">Considera apenas Receita Recebida e saídas em Débito/PIX.</p></div>

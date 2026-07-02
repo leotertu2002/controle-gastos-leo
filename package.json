@@ -1,6 +1,6 @@
 {
-  "name": "leo-finance-v1-2-9",
-  "version": "1.2.9",
+  "name": "leo-finance",
+  "version": "1.2.11",
   "private": true,
   "type": "module",
   "scripts": {
