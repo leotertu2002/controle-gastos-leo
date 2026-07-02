@@ -709,7 +709,27 @@ function App(){
   const receitasRecebidasDetalhe = useMemo(()=>transacoes.filter(t=>t.tipo==='Receita Recebida').sort((a,b)=>b.data.localeCompare(a.data)),[transacoes])
   const receitasPrevistasDetalhe = useMemo(()=>transacoes.filter(t=>t.tipo==='Receita Prevista').sort((a,b)=>b.data.localeCompare(a.data)),[transacoes])
   const creditoDetalhe = useMemo(()=>transacoes.filter(t=>t.tipo==='Despesa' && t.forma==='Crédito').sort((a,b)=>Number(b.valor)-Number(a.valor)),[transacoes])
-  const caixaDetalhe = useMemo(()=>transacoes.filter(t=>t.tipo==='Receita Recebida' || (t.forma==='Débito/PIX' && ['Despesa','Investimento','Pagamento Fatura'].includes(t.tipo))).sort((a,b)=>b.data.localeCompare(a.data)),[transacoes])
+  const caixaResumo = useMemo(()=>{
+    const receitasRecebidas = transacoes
+      .filter(t=>t.tipo==='Receita Recebida')
+      .reduce((s,t)=>s+Number(t.valor||0),0)
+    const despesasDebitoPix = transacoes
+      .filter(t=>t.tipo==='Despesa' && t.forma==='Débito/PIX')
+      .reduce((s,t)=>s+Number(t.valor||0),0)
+    const investimentosDebitoPix = transacoes
+      .filter(t=>t.tipo==='Investimento' && t.forma==='Débito/PIX')
+      .reduce((s,t)=>s+Number(t.valor||0),0)
+    const pagamentosFaturaDebitoPix = transacoes
+      .filter(t=>t.tipo==='Pagamento Fatura' && t.forma==='Débito/PIX')
+      .reduce((s,t)=>s+Number(t.valor||0),0)
+    return [
+      {id:'receitas', label:'Receitas recebidas', valor:receitasRecebidas, positive:true},
+      {id:'despesas', label:'Despesas em Débito/PIX', valor:despesasDebitoPix},
+      {id:'investimentos', label:'Investimentos em Débito/PIX', valor:investimentosDebitoPix},
+      {id:'faturas', label:'Pagamentos de fatura em Débito/PIX', valor:pagamentosFaturaDebitoPix},
+      {id:'total', label:'Caixa disponível', valor:receitasRecebidas-despesasDebitoPix-investimentosDebitoPix-pagamentosFaturaDebitoPix, total:true}
+    ]
+  },[transacoes])
   const investimentoDetalhe = useMemo(()=>transacoes.filter(t=>t.tipo==='Investimento').sort((a,b)=>b.data.localeCompare(a.data)),[transacoes])
   const compromissosPrevistosDetalhe = useMemo(()=>compromissos.filter(c=>c.status==='Previsto').sort((a,b)=>Number(b.valor_previsto)-Number(a.valor_previsto)),[compromissos])
 
@@ -751,6 +771,15 @@ function App(){
       {lista.slice(0,12).map(item=><div key={item.id}><span>{tipo==='compromisso' ? `${item.descricao} • ${item.categoria} • ${item.conta}` : `${formatBR(item.data)} • ${item.descricao} • ${item.conta}`}</span><b>{money(tipo==='compromisso'?item.valor_previsto:item.valor)}</b></div>)}
       {lista.length===0 && <p className="chart-note">Nenhum item encontrado neste ciclo.</p>}
       {lista.length>12 && <p className="chart-note">Mostrando os 12 maiores/mais recentes itens.</p>}
+    </div>
+  }
+
+  function renderResumoCaixa(){
+    return <div className="detail-list compact">
+      {caixaResumo.map(item=><div key={item.id} className={item.total?'summary-total':''}>
+        <span>{item.total ? '=' : item.positive ? '+' : '-'} {item.label}</span>
+        <b className={item.total ? (item.valor>=0?'green':'red') : item.positive ? 'green' : ''}>{money(item.valor)}</b>
+      </div>)}
     </div>
   }
 
@@ -814,7 +843,7 @@ function App(){
           <div className={`card clickable-card ${dashboardDetalhe==='investimentos'?'selected':''}`} onClick={()=>setDashboardDetalhe(dashboardDetalhe==='investimentos'?null:'investimentos')}><span>Investido no ciclo</span><strong>{money(dash.investimentos)}</strong><small>Reserva aporte: {money(dash.reservaAporte)}</small></div>
         </section>
         {dashboardDetalhe && <section className="panel dashboard-detail"><h2><ChevronDown size={18}/> Detalhes do card</h2>
-          {dashboardDetalhe==='caixa' && <><p className="chart-note">Resumo do caixa: receitas recebidas e saídas em Débito/PIX (despesas, investimentos e pagamentos de fatura).</p>{renderListaDetalhe(caixaDetalhe)}</>}
+          {dashboardDetalhe==='caixa' && <><p className="chart-note">Resumo do caixa: receitas recebidas menos saídas em Débito/PIX.</p>{renderResumoCaixa()}</>}
           {dashboardDetalhe==='receitaRecebida' && renderListaDetalhe(receitasRecebidasDetalhe)}
           {dashboardDetalhe==='receitaPrevista' && renderListaDetalhe(receitasPrevistasDetalhe)}
           {dashboardDetalhe==='credito' && renderListaDetalhe(creditoDetalhe)}
